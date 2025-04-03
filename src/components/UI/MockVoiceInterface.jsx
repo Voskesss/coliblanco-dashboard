@@ -3,6 +3,7 @@ import styled from '@emotion/styled';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FaMicrophone, FaStop, FaVolumeUp, FaPaperPlane, FaKeyboard } from 'react-icons/fa';
 import { useAppContext } from '../../context/AppContext';
+import { textToSpeech, processSpeechToSpeech } from '../../utils/openai';
 
 const VoiceContainer = styled.div`
   position: absolute;
@@ -125,10 +126,12 @@ const FeedbackText = styled(motion.div)`
 const MockVoiceInterface = ({ onCommand }) => {
   const [isListening, setIsListening] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [selectedVoice, setSelectedVoice] = useState(null);
   const [showTextInput, setShowTextInput] = useState(false);
   const [inputText, setInputText] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [audioElement, setAudioElement] = useState(null);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [audioChunks, setAudioChunks] = useState([]);
   const inputRef = useRef(null);
   
   const { orbStatus } = useAppContext();
@@ -140,101 +143,162 @@ const MockVoiceInterface = ({ onCommand }) => {
     }
   }, [showTextInput]);
   
-  // Zoek naar beschikbare stemmen bij het laden van de component
+  // Initialiseer de mediaRecorder
   useEffect(() => {
-    if ('speechSynthesis' in window) {
-      // Functie om de beste Nederlandse stem te vinden
-      const findBestDutchVoice = () => {
-        const voices = speechSynthesis.getVoices();
-        console.log('Beschikbare stemmen:', voices);
-        
-        // Zoek eerst naar een Nederlandse stem
-        let dutchVoice = voices.find(voice => 
-          voice.lang.includes('nl') && voice.localService === true
-        );
-        
-        // Als er geen Nederlandse stem is, probeer een andere Europese stem
-        if (!dutchVoice) {
-          dutchVoice = voices.find(voice => 
-            (voice.lang.includes('en-GB') || voice.lang.includes('de') || voice.lang.includes('fr')) && 
-            voice.localService === true
-          );
+    // Cleanup functie voor als de component unmount
+    return () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+      if (audioElement) {
+        audioElement.pause();
+        audioElement.src = '';
+      }
+    };
+  }, [mediaRecorder, audioElement]);
+  
+  // Start de opname van audio
+  const startRecording = async () => {
+    try {
+      setAudioChunks([]);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          setAudioChunks((chunks) => [...chunks, e.data]);
         }
-        
-        // Als er nog steeds geen stem is, gebruik de eerste beschikbare stem
-        if (!dutchVoice && voices.length > 0) {
-          dutchVoice = voices[0];
-        }
-        
-        return dutchVoice;
       };
       
-      // Probeer direct stemmen te laden
-      let voice = findBestDutchVoice();
-      if (voice) {
-        setSelectedVoice(voice);
+      recorder.onstop = async () => {
+        // Stop alle tracks in de stream om de microfoon vrij te geven
+        stream.getTracks().forEach(track => track.stop());
+        
+        if (audioChunks.length > 0) {
+          // Verwerk de opgenomen audio
+          await processRecordedAudio();
+        }
+      };
+      
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsListening(true);
+      setFeedback('Luisteren...');
+    } catch (error) {
+      console.error('Fout bij het starten van de opname:', error);
+      setFeedback('Kon de microfoon niet gebruiken. Controleer je browser-instellingen.');
+      setTimeout(() => setFeedback(''), 3000);
+    }
+  };
+  
+  // Stop de opname van audio
+  const stopRecording = () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+      setIsListening(false);
+      setFeedback('Verwerken van je spraak...');
+    }
+  };
+  
+  // Verwerk de opgenomen audio
+  const processRecordedAudio = async () => {
+    try {
+      // Maak een blob van de opgenomen audiochunks
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      
+      console.log('Audio opgenomen, type:', audioBlob.type, 'grootte:', audioBlob.size, 'bytes');
+      
+      // Verwerk de audio met de speech-to-speech functie
+      setFeedback('Verwerken van je spraak...');
+      const result = await processSpeechToSpeech(audioBlob);
+      
+      // Toon de transcriptie en het antwoord
+      setFeedback(`Jij: "${result.transcription}"
+AI: "${result.response}"`);
+      
+      // Stuur het commando door naar de parent component
+      if (onCommand) {
+        onCommand(result.response);
       }
       
-      // Stemmen worden asynchroon geladen, dus we moeten ook luisteren naar het voiceschanged event
-      speechSynthesis.onvoiceschanged = () => {
-        const voice = findBestDutchVoice();
-        if (voice) {
-          setSelectedVoice(voice);
+      // Speel het antwoord af
+      playAudio(result.audioUrl);
+      
+      // Reset na een tijdje
+      setTimeout(() => {
+        setFeedback('');
+      }, 10000);
+    } catch (error) {
+      console.error('Fout bij het verwerken van de opgenomen audio:', error);
+      setFeedback('Er is een fout opgetreden bij het verwerken van je spraak.');
+      setTimeout(() => setFeedback(''), 3000);
+    }
+  };
+  
+  // Speel audio af
+  const playAudio = (url) => {
+    try {
+      // Stop eventuele lopende audio
+      if (audioElement) {
+        audioElement.pause();
+        audioElement.src = '';
+      }
+      
+      // Controleer of de URL geldig is
+      if (!url || url === 'dummy-audio-url') {
+        console.warn('Ongeldige audio URL ontvangen');
+        setIsSpeaking(false);
+        return;
+      }
+      
+      // Maak een nieuw audio element
+      const audio = new Audio(url);
+      setAudioElement(audio);
+      
+      // Vind de orb via DOM en animeer deze
+      const orbElement = document.querySelector('.orb-ref');
+      if (orbElement && orbElement.__reactFiber$) {
+        const orbInstance = orbElement.__reactFiber$.return.stateNode;
+        if (orbInstance && orbInstance.animate) {
+          orbInstance.animate('speak');
+        }
+      }
+      
+      setIsSpeaking(true);
+      
+      // Voeg event handlers toe
+      audio.onended = () => {
+        setIsSpeaking(false);
+        if (url.startsWith('blob:')) {
+          URL.revokeObjectURL(url); // Ruim de blob URL op
         }
       };
+      
+      audio.onerror = (e) => {
+        console.error('Fout bij het afspelen van audio:', e);
+        setIsSpeaking(false);
+      };
+      
+      // Start het afspelen
+      audio.play().catch(error => {
+        console.error('Fout bij het afspelen van audio:', error);
+        setIsSpeaking(false);
+      });
+    } catch (error) {
+      console.error('Fout bij het afspelen van audio:', error);
+      setIsSpeaking(false);
     }
-  }, []);
+  };
   
-  // Simuleer spraakherkenning
+  // Toggle de microfoon
   const handleToggleMicrophone = () => {
     // Sluit tekstinvoer als die open is
     setShowTextInput(false);
     
     if (!isListening) {
-      setIsListening(true);
-      setFeedback('Luisteren...');
-      
-      // Simuleer verwerking na een vertraging
-      setTimeout(() => {
-        setFeedback('Verwerken van je vraag...');
-        
-        // Simuleer een antwoord
-        setTimeout(() => {
-          const simulatedCommands = [
-            'Toon mijn agenda voor vandaag',
-            'Wat is mijn eerste afspraak?',
-            'Stuur een bericht naar het team',
-            'Hoe laat is mijn meeting?',
-            'Wat staat er op de planning voor deze week?',
-            'Herinner me aan de deadline van vrijdag',
-            'Maak een notitie over het nieuwe project'
-          ];
-          
-          const randomCommand = simulatedCommands[Math.floor(Math.random() * simulatedCommands.length)];
-          
-          // Stuur het commando door naar de parent component
-          if (onCommand) {
-            onCommand(randomCommand);
-          }
-          
-          setFeedback(`"${randomCommand}" verwerkt`);
-          
-          // Reset na het tonen van feedback
-          setTimeout(() => {
-            setFeedback('');
-            setIsListening(false);
-          }, 3000);
-        }, 1500);
-      }, 1500);
+      startRecording();
     } else {
-      // Annuleer luisteren
-      setIsListening(false);
-      setFeedback('Luisteren geannuleerd');
-      
-      // Wis feedback na een vertraging
-      setTimeout(() => {
-        setFeedback('');
-      }, 1500);
+      stopRecording();
     }
   };
   
@@ -242,33 +306,48 @@ const MockVoiceInterface = ({ onCommand }) => {
   const toggleTextInput = () => {
     setShowTextInput(!showTextInput);
     if (isListening) {
-      setIsListening(false);
-      setFeedback('');
+      stopRecording();
     }
   };
   
   // Verwerk de tekstinvoer
-  const handleSendText = () => {
+  const handleSendText = async () => {
     if (inputText.trim() === '') return;
     
-    setFeedback(`Verwerken van "${inputText}"...`);
+    const userText = inputText.trim();
+    setFeedback(`Verwerken van "${userText}"...`);
     
-    // Stuur het commando door naar de parent component
-    if (onCommand) {
-      onCommand(inputText);
-    }
-    
-    // Simuleer verwerking
-    setTimeout(() => {
-      setFeedback(`"${inputText}" verwerkt`);
+    try {
+      // Verwerk de tekst met het LLM en zet het antwoord om naar spraak
+      const result = await processSpeechToSpeech(null, { userText });
+      
+      // Toon het antwoord
+      setFeedback(`Jij: "${userText}"
+AI: "${result.response}"`);
+      
+      // Stuur het commando door naar de parent component
+      if (onCommand) {
+        onCommand(result.response);
+      }
+      
+      // Speel het antwoord af
+      playAudio(result.audioUrl);
+      
+      // Reset de input
       setInputText('');
       
-      // Reset na het tonen van feedback
+      // Reset na een tijdje
       setTimeout(() => {
         setFeedback('');
         setShowTextInput(false);
+      }, 10000);
+    } catch (error) {
+      console.error('Fout bij het verwerken van tekst:', error);
+      setFeedback('Er is een fout opgetreden bij het verwerken van je bericht.');
+      setTimeout(() => {
+        setFeedback('');
       }, 3000);
-    }, 1500);
+    }
   };
   
   // Verwerk Enter toets in het tekstinvoerveld
@@ -277,59 +356,6 @@ const MockVoiceInterface = ({ onCommand }) => {
       handleSendText();
     }
   };
-  
-  // Verbeterde spraaksynthese functie
-  const speakText = (text) => {
-    if ('speechSynthesis' in window) {
-      // Stop eventuele lopende spraak
-      speechSynthesis.cancel();
-      
-      const utterance = new SpeechSynthesisUtterance(text);
-      
-      // Stel de stem in als we een geschikte stem hebben gevonden
-      if (selectedVoice) {
-        utterance.voice = selectedVoice;
-      }
-      
-      // Pas de spraakparameters aan voor een betere kwaliteit
-      utterance.lang = 'nl-NL';
-      utterance.pitch = 1.0;  // Normale toonhoogte
-      utterance.rate = 1.0;   // Normale snelheid
-      utterance.volume = 1.0; // Maximaal volume
-      
-      // Voeg event handlers toe
-      utterance.onstart = () => {
-        console.log('Spraak gestart');
-        setIsSpeaking(true);
-        
-        // Vind de orb via DOM en animeer deze
-        const orbElement = document.querySelector('.orb-ref');
-        if (orbElement && orbElement.__reactFiber$) {
-          const orbInstance = orbElement.__reactFiber$.return.stateNode;
-          if (orbInstance && orbInstance.animate) {
-            orbInstance.animate('speak');
-          }
-        }
-      };
-      
-      utterance.onend = () => {
-        console.log('Spraak beëindigd');
-        setIsSpeaking(false);
-      };
-      
-      utterance.onerror = (e) => console.error('Spraak fout:', e);
-      
-      // Start de spraak
-      speechSynthesis.speak(utterance);
-    }
-  };
-  
-  // Spreek het feedback bericht uit wanneer het verandert
-  useEffect(() => {
-    if (feedback && feedback !== 'Luisteren...' && feedback !== 'Verwerken van je vraag...') {
-      speakText(feedback);
-    }
-  }, [feedback]);
   
   return (
     <VoiceContainer>
@@ -341,7 +367,12 @@ const MockVoiceInterface = ({ onCommand }) => {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
           >
-            {feedback}
+            {feedback.split('\n').map((line, index) => (
+              <React.Fragment key={index}>
+                {line}
+                {index < feedback.split('\n').length - 1 && <br />}
+              </React.Fragment>
+            ))}
           </FeedbackText>
         )}
       </AnimatePresence>
