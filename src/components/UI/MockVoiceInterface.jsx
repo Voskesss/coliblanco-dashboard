@@ -338,8 +338,15 @@ const MockVoiceInterface = ({ onCommand }) => {
         };
         
         recorder.onstop = async () => {
+          console.log('MediaRecorder gestopt, verwerking starten...');
+          console.log('AudioChunks beschikbaar:', audioChunks.length);
+          
+          // Voorkom dat de verwerking wordt gestart als we al aan het verwerken zijn
           if (!isProcessing && audioChunks.length > 0) {
+            console.log('Verwerking van opgenomen audio starten...');
             await processRecordedAudio();
+          } else {
+            console.log('Geen verwerking gestart: isProcessing =', isProcessing, 'audioChunks.length =', audioChunks.length);
           }
         };
         
@@ -466,6 +473,7 @@ const MockVoiceInterface = ({ onCommand }) => {
   // Stop de opname van audio
   const stopRecording = () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
+      console.log('Opname stoppen en verwerken...');
       mediaRecorder.stop();
       setIsListening(false);
       
@@ -480,15 +488,69 @@ const MockVoiceInterface = ({ onCommand }) => {
     }
   };
   
+  // Toggle tussen continue luisteren en handmatige modus
+  const toggleContinuousMode = () => {
+    if (isContinuousMode) {
+      // Schakel continue modus uit
+      setIsContinuousMode(false);
+      cleanupAudioResources();
+    } else {
+      // Schakel continue modus in
+      setIsContinuousMode(true);
+      startContinuousListening();
+    }
+  };
+  
+  // Handmatige knop voor opname starten/stoppen
+  const handleRecordButtonClick = () => {
+    if (isProcessing || isSpeaking) return;
+    
+    if (isListening) {
+      // Als we al aan het luisteren zijn, stop dan met opnemen
+      console.log('Stoppen met opnemen...');
+      stopRecording();
+    } else {
+      // Anders start met opnemen
+      if (isContinuousMode) {
+        // In continue modus, start direct met luisteren
+        console.log('Starten met opnemen in continue modus...');
+        startContinuousListening();
+      } else {
+        // In handmatige modus, start alleen de opname
+        if (mediaRecorder && streamRef.current) {
+          console.log('Starten met opnemen...');
+          startRecording();
+        } else {
+          // Als er nog geen mediaRecorder is, maak deze dan eerst aan
+          console.log('Maak mediaRecorder aan en start opname...');
+          startContinuousListening();
+        }
+      }
+    }
+  };
+  
   // Verwerk de opgenomen audio
   const processRecordedAudio = async () => {
-    if (isProcessing || audioChunks.length === 0) return;
+    // Voorkom dubbele verwerking of verwerking zonder audio
+    if (isProcessing) {
+      console.log('Verwerking al bezig, nieuwe verwerking overgeslagen');
+      return;
+    }
     
+    if (audioChunks.length === 0) {
+      console.log('Geen audiochunks beschikbaar, verwerking overgeslagen');
+      return;
+    }
+    
+    console.log('Start verwerking van opgenomen audio');
     setIsProcessing(true);
     
     try {
+      // Maak een lokale kopie van de audioChunks om race conditions te voorkomen
+      const currentAudioChunks = [...audioChunks];
+      
       // Maak een blob van de opgenomen audiochunks
-      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const audioBlob = new Blob(currentAudioChunks, { type: 'audio/webm' });
       
       console.log('Audio opgenomen, type:', audioBlob.type, 'grootte:', audioBlob.size, 'bytes');
       
@@ -507,7 +569,16 @@ const MockVoiceInterface = ({ onCommand }) => {
       
       // Verwerk de audio met de speech-to-speech functie
       setFeedback('Verwerken van je spraak...');
-      const result = await processSpeechToSpeech(audioBlob);
+      
+      // Maak een kopie van de audioBlob om te voorkomen dat deze wordt verwijderd
+      const audioBlobCopy = new Blob([audioBlob], { type: audioBlob.type });
+      console.log('Audioblob kopie gemaakt, verwerking starten...');
+      
+      // Bewaar de huidige audioBlob in een ref om te voorkomen dat deze wordt opgeschoond
+      const currentAudioBlob = audioBlobCopy;
+      
+      const result = await processSpeechToSpeech(currentAudioBlob);
+      console.log('Spraakverwerking voltooid, resultaat ontvangen');
       
       // Speel direct de snelle bevestiging af terwijl de rest nog verwerkt wordt
       if (result.quickAudioUrl) {
@@ -538,6 +609,7 @@ AI: "${result.response}"`);
       }, 1000);
     } catch (error) {
       console.error('Fout bij het verwerken van de opgenomen audio:', error);
+      console.error('Details van de fout:', error.message, error.stack);
       setFeedback('Er is een fout opgetreden bij het verwerken van je spraak.');
       
       setTimeout(() => {
