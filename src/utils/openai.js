@@ -166,6 +166,9 @@ const useBrowserTTS = (text) => {
 // Volledige chained functie voor spraak naar spraak verwerking
 export const processSpeechToSpeech = async (audioBlob, context = {}) => {
   try {
+    // Toon een vroege feedback voordat we beginnen met verwerken
+    console.log('Start van spraak-naar-spraak verwerking');
+    
     // Stap 1: Transcribeer audio naar tekst als we een audioBlob hebben
     let transcription = "";
     if (audioBlob) {
@@ -184,7 +187,15 @@ export const processSpeechToSpeech = async (audioBlob, context = {}) => {
     }
     
     // Stap 2: Verwerk de tekst met het LLM
-    const response = await processWithLLM(transcription, context);
+    // Start de TTS verwerking parallel met de LLM verwerking voor snellere respons
+    const llmPromise = processWithLLM(transcription, context);
+    
+    // Maak alvast een korte bevestiging klaar terwijl we wachten op het volledige antwoord
+    const quickAcknowledgement = "Ik denk na over je vraag...";
+    const quickAudioPromise = textToSpeech(quickAcknowledgement);
+    
+    // Wacht op het LLM antwoord
+    const response = await llmPromise;
     console.log('LLM antwoord:', response);
     
     // Stap 3: Converteer het antwoord naar spraak
@@ -194,7 +205,8 @@ export const processSpeechToSpeech = async (audioBlob, context = {}) => {
     return {
       transcription,
       response,
-      audioUrl
+      audioUrl,
+      quickAudioUrl: await quickAudioPromise
     };
   } catch (error) {
     console.error('Fout in speech-to-speech verwerking:', error);
