@@ -240,7 +240,7 @@ const MockVoiceInterface = ({ onCommand }) => {
   const analyserRef = useRef(null);
   const streamRef = useRef(null);
   
-  const { orbStatus } = useAppContext();
+  const { orbStatus, mockTasks, processCommand } = useAppContext();
   
   // Focus op het tekstinvoerveld wanneer het wordt weergegeven
   useEffect(() => {
@@ -716,10 +716,10 @@ AI: "${result.response}"`);
     }
   };
   
-  // Verwerk Enter toets in het tekstinvoerveld
+  // Handle key press in text input
   const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      handleSendText();
+    if (e.key === 'Enter' && !isProcessing) {
+      handleTextSubmit();
     }
   };
   
@@ -784,39 +784,43 @@ AI: "${result.response}"`);
       // Verwerk de audio met de speech-to-speech functie
       setFeedback('Verwerken van je spraak...');
       
-      // Bewaar de huidige audioFile in een ref om te voorkomen dat deze wordt opgeschoond
-      const currentAudioFile = audioFile;
+      // In plaats van echte verwerking, gebruik de mock-taken uit de context
+      const { mockTasks, processCommand } = useAppContext();
       
-      const result = await processSpeechToSpeech(currentAudioFile);
-      console.log('Spraakverwerking voltooid, resultaat ontvangen');
-      
-      // Speel direct de snelle bevestiging af terwijl de rest nog verwerkt wordt
-      if (result.quickAudioUrl) {
-        playAudio(result.quickAudioUrl, true); // true = is een tijdelijke audio
-      }
-      
-      // Toon de transcriptie en het antwoord
-      setFeedback(`Jij: "${result.transcription}"
-AI: "${result.response}"`);
-      
-      // Stuur het commando door naar de parent component
-      if (onCommand) {
-        onCommand(result.response);
-      }
-      
-      // Speel het volledige antwoord af
-      await playAudio(result.audioUrl);
-      
-      // Reset na een tijdje
-      setTimeout(() => {
-        setFeedback('');
-        setIsProcessing(false);
+      // Simuleer transcriptie met een vertraging
+      setTimeout(async () => {
+        // Simuleer een transcriptie
+        const mockTranscription = textInput || "Wat staat er vandaag op de agenda?";
+        console.log('Gesimuleerde transcriptie:', mockTranscription);
         
-        // Start opnieuw met luisteren in continue modus
-        if (isContinuousMode && mediaRecorder) {
-          startRecording();
+        // Verwerk het commando via de context
+        const result = processCommand(mockTranscription);
+        
+        // Toon de transcriptie en het antwoord
+        setFeedback(`Jij: "${mockTranscription}"
+AI: "${result.response}"`);
+        
+        // Speel het antwoord af
+        if (result.audioUrl) {
+          await playAudio(result.audioUrl);
+        } else {
+          // Als er geen audio URL is, gebruik de OpenAI TTS API
+          const audioUrl = await textToSpeech(result.response);
+          await playAudio(audioUrl);
         }
-      }, 1000);
+        
+        // Reset na een tijdje
+        setTimeout(() => {
+          setFeedback('');
+          setIsProcessing(false);
+          
+          // Start opnieuw met luisteren in continue modus
+          if (isContinuousMode && mediaRecorder) {
+            startRecording();
+          }
+        }, 1000);
+      }, 1500); // Simuleer vertraging van 1.5 seconden voor transcriptie
+      
     } catch (error) {
       console.error('Fout bij het verwerken van de opgenomen audio:', error);
       console.error('Details van de fout:', error.message, error.stack);
@@ -833,7 +837,56 @@ AI: "${result.response}"`);
       }, 3000);
     }
   };
-  
+
+  // Verwerk tekst input
+  const handleTextSubmit = () => {
+    if (!inputText.trim() || isProcessing) return;
+    
+    setIsProcessing(true);
+    setFeedback('Verwerken van je bericht...');
+    
+    // Gebruik de mock-taken uit de context
+    const { processCommand } = useAppContext();
+    
+    // Simuleer verwerking met een vertraging
+    setTimeout(async () => {
+      try {
+        // Verwerk het commando via de context
+        const result = processCommand(inputText);
+        
+        // Toon de transcriptie en het antwoord
+        setFeedback(`Jij: "${inputText}"
+AI: "${result.response}"`);
+        
+        // Speel het antwoord af
+        if (result.audioUrl) {
+          await playAudio(result.audioUrl);
+        } else {
+          // Als er geen audio URL is, gebruik de OpenAI TTS API
+          const audioUrl = await textToSpeech(result.response);
+          await playAudio(audioUrl);
+        }
+        
+        // Reset invoerveld
+        setInputText('');
+        
+        // Reset na een tijdje
+        setTimeout(() => {
+          setFeedback('');
+          setIsProcessing(false);
+        }, 1000);
+      } catch (error) {
+        console.error('Fout bij het verwerken van tekstinvoer:', error);
+        setFeedback('Er is een fout opgetreden bij het verwerken van je bericht.');
+        
+        setTimeout(() => {
+          setFeedback('');
+          setIsProcessing(false);
+        }, 3000);
+      }
+    }, 1000);
+  };
+
   return (
     <VoiceContainer>
       <AnimatePresence>
@@ -871,7 +924,7 @@ AI: "${result.response}"`);
               onChange={(e) => setInputText(e.target.value)}
               onKeyPress={handleKeyPress}
             />
-            <SendButton onClick={handleSendText} whileTap={{ scale: 0.9 }}>
+            <SendButton onClick={handleTextSubmit} whileTap={{ scale: 0.9 }}>
               <FaPaperPlane />
             </SendButton>
           </TextInputContainer>
