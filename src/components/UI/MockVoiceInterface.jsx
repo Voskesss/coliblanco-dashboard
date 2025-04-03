@@ -221,6 +221,29 @@ const ModeToggle = styled(motion.button)`
   }
 `;
 
+const DemoButton = styled(motion.button)`
+  background-color: rgba(255, 255, 255, 0.7);
+  border: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  color: #333;
+  font-size: 0.9rem;
+  transition: background-color 0.3s ease;
+  padding: 0.5rem 1rem;
+  border-radius: 25px;
+  
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.9);
+  }
+  
+  &:focus {
+    outline: none;
+  }
+`;
+
 const MockVoiceInterface = ({ onCommand }) => {
   const [isListening, setIsListening] = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(true); 
@@ -887,6 +910,26 @@ AI: "${result.response}"`);
     }, 1000);
   };
 
+  // Demo functie om automatisch een vooraf gedefinieerde taak te tonen
+  const showRandomTask = () => {
+    if (isProcessing || isSpeaking) return;
+    
+    // Haal de mock-taken op uit de context
+    const { mockTasks } = useAppContext();
+    
+    // Kies een willekeurige taak
+    const randomIndex = Math.floor(Math.random() * mockTasks.length);
+    const randomTask = mockTasks[randomIndex];
+    
+    // Simuleer dat de gebruiker deze taak heeft gevraagd
+    setInputText(randomTask.command);
+    
+    // Verwerk de taak
+    setTimeout(() => {
+      handleTextSubmit();
+    }, 500);
+  };
+
   return (
     <VoiceContainer>
       <AnimatePresence>
@@ -938,6 +981,7 @@ AI: "${result.response}"`);
         >
           <FaKeyboard />
         </TextButton>
+        
         <RecordButton 
           onClick={handleRecordButtonClick}
           disabled={isProcessing || isSpeaking}
@@ -958,6 +1002,15 @@ AI: "${result.response}"`);
           />
           {statusMessage && <StatusText>{statusMessage}</StatusText>}
         </RecordButton>
+        
+        <DemoButton 
+          onClick={showRandomTask}
+          disabled={isProcessing || isSpeaking}
+          whileTap={{ scale: 0.9 }}
+        >
+          Demo Taak
+        </DemoButton>
+        
         <ModeToggle 
           onClick={() => toggleContinuousMode()}
           isContinuous={isContinuousMode}
