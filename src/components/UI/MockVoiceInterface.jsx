@@ -173,6 +173,54 @@ const SpinnerIcon = styled(motion.div)`
   margin-right: 5px;
 `;
 
+const RecordButton = styled(motion.button)`
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background-color: ${props => props.isListening ? '#FF9800' : 'rgba(255, 255, 255, 0.7)'};
+  border: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  color: ${props => props.isListening ? 'white' : '#333'};
+  font-size: 1.2rem;
+  transition: background-color 0.3s ease;
+  position: relative;
+  
+  &:hover {
+    background-color: ${props => props.isListening ? '#F57C00' : 'rgba(255, 255, 255, 0.9)'};
+  }
+  
+  &:focus {
+    outline: none;
+  }
+`;
+
+const ModeToggle = styled(motion.button)`
+  background-color: ${props => props.isContinuous ? '#FF9800' : 'rgba(255, 255, 255, 0.7)'};
+  border: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  color: ${props => props.isContinuous ? 'white' : '#333'};
+  font-size: 0.9rem;
+  transition: background-color 0.3s ease;
+  padding: 0.5rem 1rem;
+  border-radius: 25px;
+  
+  &:hover {
+    background-color: ${props => props.isContinuous ? '#F57C00' : 'rgba(255, 255, 255, 0.9)'};
+  }
+  
+  &:focus {
+    outline: none;
+  }
+`;
+
 const MockVoiceInterface = ({ onCommand }) => {
   const [isListening, setIsListening] = useState(false);
   const [isContinuousMode, setIsContinuousMode] = useState(true); 
@@ -297,6 +345,8 @@ const MockVoiceInterface = ({ onCommand }) => {
       // Maak eerst schoon om dubbele resources te voorkomen
       cleanupAudioResources();
       
+      console.log('Start continue luisteren modus...');
+      
       // Vraag toestemming voor microfoon
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { 
@@ -305,6 +355,8 @@ const MockVoiceInterface = ({ onCommand }) => {
           autoGainControl: true
         } 
       });
+      
+      console.log('Microfoon toegang verkregen');
       
       // Sla de stream op in de ref
       streamRef.current = stream;
@@ -321,6 +373,8 @@ const MockVoiceInterface = ({ onCommand }) => {
         const source = audioContext.createMediaStreamSource(stream);
         source.connect(analyser);
         
+        console.log('AudioContext en analyser opgezet');
+        
         // Start met luisteren naar geluidsniveaus
         monitorAudioLevels();
       } catch (err) {
@@ -329,12 +383,45 @@ const MockVoiceInterface = ({ onCommand }) => {
       
       // Maak een nieuwe MediaRecorder
       try {
-        const recorder = new MediaRecorder(stream);
+        // Controleer welke MIME types ondersteund worden
+        const supportedTypes = ['audio/webm', 'audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'];
+        let selectedType = '';
         
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) {
-            setAudioChunks((chunks) => [...chunks, e.data]);
+        for (const type of supportedTypes) {
+          if (MediaRecorder.isTypeSupported(type)) {
+            selectedType = type;
+            console.log('Ondersteund MIME type gevonden:', type);
+            break;
           }
+        }
+        
+        if (!selectedType) {
+          console.warn('Geen ondersteund MIME type gevonden, gebruik standaard type');
+          selectedType = 'audio/webm';
+        }
+        
+        // Maak recorder met ondersteund type
+        const recorder = new MediaRecorder(stream, { mimeType: selectedType });
+        console.log('MediaRecorder aangemaakt met MIME type:', recorder.mimeType);
+        
+        // Configureer de event handlers
+        recorder.ondataavailable = (e) => {
+          console.log('Data beschikbaar event ontvangen, grootte:', e.data.size, 'bytes');
+          if (e.data && e.data.size > 0) {
+            setAudioChunks((chunks) => {
+              const newChunks = [...chunks, e.data];
+              console.log('AudioChunks bijgewerkt, aantal chunks:', newChunks.length);
+              return newChunks;
+            });
+          }
+        };
+        
+        recorder.onstart = () => {
+          console.log('MediaRecorder gestart');
+        };
+        
+        recorder.onerror = (event) => {
+          console.error('MediaRecorder fout:', event.error);
         };
         
         recorder.onstop = async () => {
@@ -461,8 +548,19 @@ const MockVoiceInterface = ({ onCommand }) => {
   const startRecording = (recorder = mediaRecorder) => {
     if (!recorder || recorder.state === 'recording') return;
     
+    console.log('Start opname met mediaRecorder...');
     setAudioChunks([]);
-    recorder.start();
+    
+    // Zorg ervoor dat ondataavailable vaak genoeg wordt aangeroepen
+    try {
+      // Gebruik een kleinere timeslice (50ms) om vaker ondataavailable events te krijgen
+      recorder.start(50);
+      console.log('MediaRecorder gestart met timeslice van 50ms');
+    } catch (err) {
+      console.error('Fout bij starten van mediaRecorder:', err);
+      return;
+    }
+    
     setIsListening(true);
     
     if (!isContinuousMode) {
@@ -505,6 +603,8 @@ const MockVoiceInterface = ({ onCommand }) => {
   const handleRecordButtonClick = () => {
     if (isProcessing || isSpeaking) return;
     
+    console.log('Record button clicked');
+    
     if (isListening) {
       // Als we al aan het luisteren zijn, stop dan met opnemen
       console.log('Stoppen met opnemen...');
@@ -527,192 +627,36 @@ const MockVoiceInterface = ({ onCommand }) => {
         }
       }
     }
-  };
-  
-  // Verwerk de opgenomen audio
-  const processRecordedAudio = async () => {
-    // Voorkom dubbele verwerking of verwerking zonder audio
-    if (isProcessing) {
-      console.log('Verwerking al bezig, nieuwe verwerking overgeslagen');
-      return;
-    }
-    
-    if (audioChunks.length === 0) {
-      console.log('Geen audiochunks beschikbaar, verwerking overgeslagen');
-      return;
-    }
-    
-    console.log('Start verwerking van opgenomen audio');
-    setIsProcessing(true);
-    
-    try {
-      // Maak een lokale kopie van de audioChunks om race conditions te voorkomen
-      const currentAudioChunks = [...audioChunks];
-      
-      // Maak een blob van de opgenomen audiochunks
-      const audioBlob = new Blob(currentAudioChunks, { type: 'audio/webm' });
-      
-      console.log('Audio opgenomen, type:', audioBlob.type, 'grootte:', audioBlob.size, 'bytes');
-      
-      // Verwerk de audio alleen als de blob groot genoeg is (om lege opnames te voorkomen)
-      if (audioBlob.size < 1000) {
-        console.warn('Audio opname te klein, waarschijnlijk geen spraak');
-        setIsProcessing(false);
-        
-        // Start opnieuw met luisteren in continue modus
-        if (isContinuousMode && mediaRecorder) {
-          startRecording();
-        }
-        
-        return;
-      }
-      
-      // Verwerk de audio met de speech-to-speech functie
-      setFeedback('Verwerken van je spraak...');
-      
-      // Maak een kopie van de audioBlob om te voorkomen dat deze wordt verwijderd
-      const audioBlobCopy = new Blob([audioBlob], { type: audioBlob.type });
-      console.log('Audioblob kopie gemaakt, verwerking starten...');
-      
-      // Bewaar de huidige audioBlob in een ref om te voorkomen dat deze wordt opgeschoond
-      const currentAudioBlob = audioBlobCopy;
-      
-      const result = await processSpeechToSpeech(currentAudioBlob);
-      console.log('Spraakverwerking voltooid, resultaat ontvangen');
-      
-      // Speel direct de snelle bevestiging af terwijl de rest nog verwerkt wordt
-      if (result.quickAudioUrl) {
-        playAudio(result.quickAudioUrl, true); // true = is een tijdelijke audio
-      }
-      
-      // Toon de transcriptie en het antwoord
-      setFeedback(`Jij: "${result.transcription}"
-AI: "${result.response}"`);
-      
-      // Stuur het commando door naar de parent component
-      if (onCommand) {
-        onCommand(result.response);
-      }
-      
-      // Speel het volledige antwoord af
-      await playAudio(result.audioUrl);
-      
-      // Reset na een tijdje
-      setTimeout(() => {
-        setFeedback('');
-        setIsProcessing(false);
-        
-        // Start opnieuw met luisteren in continue modus
-        if (isContinuousMode && mediaRecorder) {
-          startRecording();
-        }
-      }, 1000);
-    } catch (error) {
-      console.error('Fout bij het verwerken van de opgenomen audio:', error);
-      console.error('Details van de fout:', error.message, error.stack);
-      setFeedback('Er is een fout opgetreden bij het verwerken van je spraak.');
-      
-      setTimeout(() => {
-        setFeedback('');
-        setIsProcessing(false);
-        
-        // Start opnieuw met luisteren in continue modus
-        if (isContinuousMode && mediaRecorder) {
-          startRecording();
-        }
-      }, 3000);
-    }
-  };
-  
-  // Speel audio af
-  const playAudio = async (url, isTemporary = false) => {
-    try {
-      // Stop eventuele lopende audio
-      if (audioElement) {
-        audioElement.pause();
-        audioElement.src = '';
-      }
-      
-      // Controleer of de URL geldig is
-      if (!url || url === 'dummy-audio-url') {
-        console.warn('Ongeldige audio URL ontvangen');
-        setIsSpeaking(false);
-        return;
-      }
-      
-      // Maak een nieuw audio element
-      const audio = new Audio(url);
-      setAudioElement(audio);
-      
-      // Vind de orb via DOM en animeer deze
-      const orbElement = document.querySelector('.orb-ref');
-      if (orbElement && orbElement.__reactFiber$) {
-        const orbInstance = orbElement.__reactFiber$.return.stateNode;
-        if (orbInstance && orbInstance.animate) {
-          orbInstance.animate('speak');
-        }
-      }
-      
-      setIsSpeaking(true);
-      
-      // Voeg event handlers toe
-      audio.onended = () => {
-        setIsSpeaking(false);
-        if (url.startsWith('blob:')) {
-          URL.revokeObjectURL(url); // Ruim de blob URL op
-        }
-      };
-      
-      audio.onerror = (e) => {
-        console.error('Fout bij het afspelen van audio:', e);
-        setIsSpeaking(false);
-      };
-      
-      // Start het afspelen
-      await audio.play().catch(error => {
-        console.error('Fout bij het afspelen van audio:', error);
-        setIsSpeaking(false);
-      });
-      
-      // Als het een tijdelijke audio is (zoals de snelle bevestiging),
-      // hoeven we niet te wachten tot het klaar is
-      if (isTemporary) {
-        return;
-      }
-      
-      // Wacht tot het afspelen klaar is
-      return new Promise((resolve) => {
-        audio.onended = () => {
-          setIsSpeaking(false);
-          if (url.startsWith('blob:')) {
-            URL.revokeObjectURL(url); // Ruim de blob URL op
-          }
-          resolve();
-        };
-      });
-    } catch (error) {
-      console.error('Fout bij het afspelen van audio:', error);
-      setIsSpeaking(false);
-    }
+    console.log('Record button clicked');
   };
   
   // Toggle de microfoon
   const handleToggleMicrophone = () => {
-    // Sluit tekstinvoer als die open is
-    setShowTextInput(false);
+    if (isProcessing || isSpeaking) return;
     
-    // Toggle continue luisteren modus
-    setIsContinuousMode(!isContinuousMode);
+    console.log('Microfoon toggle aangeroepen');
     
-    if (!isListening) {
-      if (!isContinuousMode) {
+    if (isListening) {
+      // Als we al aan het luisteren zijn, stop dan met opnemen
+      console.log('Stoppen met opnemen...');
+      stopRecording();
+    } else {
+      // Anders start met opnemen
+      if (isContinuousMode) {
+        // In continue modus, start direct met luisteren
+        console.log('Starten met opnemen in continue modus...');
         startContinuousListening();
       } else {
-        startRecording();
+        // In handmatige modus, start alleen de opname
+        if (mediaRecorder && streamRef.current) {
+          console.log('Starten met opnemen...');
+          startRecording();
+        } else {
+          // Als er nog geen mediaRecorder is, maak deze dan eerst aan
+          console.log('Maak mediaRecorder aan en start opname...');
+          startContinuousListening();
+        }
       }
-    } else {
-      stopRecording();
-      cleanupAudioResources();
     }
   };
   
@@ -789,6 +733,107 @@ AI: "${result.response}"`);
     </SpinnerIcon>
   );
   
+  // Verwerk de opgenomen audio
+  const processRecordedAudio = async () => {
+    // Voorkom dubbele verwerking of verwerking zonder audio
+    if (isProcessing) {
+      console.log('Verwerking al bezig, nieuwe verwerking overgeslagen');
+      return;
+    }
+    
+    if (audioChunks.length === 0) {
+      console.log('Geen audiochunks beschikbaar, verwerking overgeslagen');
+      return;
+    }
+    
+    console.log('Start verwerking van opgenomen audio, aantal chunks:', audioChunks.length);
+    setIsProcessing(true);
+    
+    try {
+      // Maak een lokale kopie van de audioChunks om race conditions te voorkomen
+      const currentAudioChunks = [...audioChunks];
+      console.log('Lokale kopie van audioChunks gemaakt, aantal:', currentAudioChunks.length);
+      
+      // Maak een File object van de opgenomen audiochunks
+      const audioFile = new File(currentAudioChunks, 'audio.webm', { type: 'audio/webm' });
+      
+      console.log('Audio File object gemaakt, type:', audioFile.type, 'grootte:', audioFile.size, 'bytes');
+      
+      // Debug: Log de eerste paar bytes van de file
+      const reader = new FileReader();
+      reader.onload = () => {
+        const arrayBuffer = reader.result;
+        const bytes = new Uint8Array(arrayBuffer);
+        console.log('Eerste 20 bytes van audio file:', Array.from(bytes.slice(0, 20)));
+      };
+      reader.readAsArrayBuffer(audioFile);
+      
+      // Verwerk de audio alleen als de file groot genoeg is (om lege opnames te voorkomen)
+      if (audioFile.size < 1000) {
+        console.warn('Audio opname te klein, waarschijnlijk geen spraak');
+        setIsProcessing(false);
+        
+        // Start opnieuw met luisteren in continue modus
+        if (isContinuousMode && mediaRecorder) {
+          startRecording();
+        }
+        
+        return;
+      }
+      
+      // Verwerk de audio met de speech-to-speech functie
+      setFeedback('Verwerken van je spraak...');
+      
+      // Bewaar de huidige audioFile in een ref om te voorkomen dat deze wordt opgeschoond
+      const currentAudioFile = audioFile;
+      
+      const result = await processSpeechToSpeech(currentAudioFile);
+      console.log('Spraakverwerking voltooid, resultaat ontvangen');
+      
+      // Speel direct de snelle bevestiging af terwijl de rest nog verwerkt wordt
+      if (result.quickAudioUrl) {
+        playAudio(result.quickAudioUrl, true); // true = is een tijdelijke audio
+      }
+      
+      // Toon de transcriptie en het antwoord
+      setFeedback(`Jij: "${result.transcription}"
+AI: "${result.response}"`);
+      
+      // Stuur het commando door naar de parent component
+      if (onCommand) {
+        onCommand(result.response);
+      }
+      
+      // Speel het volledige antwoord af
+      await playAudio(result.audioUrl);
+      
+      // Reset na een tijdje
+      setTimeout(() => {
+        setFeedback('');
+        setIsProcessing(false);
+        
+        // Start opnieuw met luisteren in continue modus
+        if (isContinuousMode && mediaRecorder) {
+          startRecording();
+        }
+      }, 1000);
+    } catch (error) {
+      console.error('Fout bij het verwerken van de opgenomen audio:', error);
+      console.error('Details van de fout:', error.message, error.stack);
+      setFeedback('Er is een fout opgetreden bij het verwerken van je spraak.');
+      
+      setTimeout(() => {
+        setFeedback('');
+        setIsProcessing(false);
+        
+        // Start opnieuw met luisteren in continue modus
+        if (isContinuousMode && mediaRecorder) {
+          startRecording();
+        }
+      }, 3000);
+    }
+  };
+  
   return (
     <VoiceContainer>
       <AnimatePresence>
@@ -840,10 +885,13 @@ AI: "${result.response}"`);
         >
           <FaKeyboard />
         </TextButton>
-        <MicButton 
+        <RecordButton 
+          onClick={handleRecordButtonClick}
+          disabled={isProcessing || isSpeaking}
           isListening={isListening}
-          onClick={handleToggleMicrophone}
-          whileTap={{ scale: 0.9 }}
+          isProcessing={isProcessing}
+          isSpeaking={isSpeaking}
+          lastAudioLevel={lastAudioLevel}
         >
           {isListening ? <FaStop /> : <FaMicrophone />}
           <StatusIndicator 
@@ -856,7 +904,14 @@ AI: "${result.response}"`);
             level={lastAudioLevel} 
           />
           {statusMessage && <StatusText>{statusMessage}</StatusText>}
-        </MicButton>
+        </RecordButton>
+        <ModeToggle 
+          onClick={() => toggleContinuousMode()}
+          isContinuous={isContinuousMode}
+          disabled={isProcessing || isSpeaking}
+        >
+          {isContinuousMode ? 'Continue modus' : 'Handmatige modus'}
+        </ModeToggle>
       </ButtonsContainer>
     </VoiceContainer>
   );
