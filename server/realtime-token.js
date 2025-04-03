@@ -8,23 +8,27 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Laad environment variables uit .env bestand
+require('dotenv').config();
+
+// Gebruik de environment variable direct
+const OPENAI_API_KEY = process.env.VITE_OPENAI_API_KEY;
+
+if (!OPENAI_API_KEY) {
+  console.error('VITE_OPENAI_API_KEY environment variable is niet ingesteld!');
+}
+
 // Route voor het genereren van een ephemeral token
 app.get('/session', async (req, res) => {
   try {
     console.log('Ephemeral token aanvraag ontvangen');
-    
-    // Haal de API key op uit de environment variabelen
-    const apiKey = process.env.VITE_OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('OpenAI API key niet gevonden in environment variabelen');
-    }
     
     // Maak een directe REST API aanvraag naar het OpenAI endpoint voor ephemeral tokens
     console.log('Directe REST API aanvraag naar OpenAI voor ephemeral token');
     const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
         'OpenAI-Beta': 'realtime=v1'
       },

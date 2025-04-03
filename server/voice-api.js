@@ -2,41 +2,39 @@
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const { OpenAI } = require('openai');
 const fs = require('fs');
 const path = require('path');
+const dotenv = require('dotenv');
 
-// Lees het .env bestand handmatig
-const envPath = path.resolve(__dirname, '../.env');
-let apiKey = '';
+// Laad environment variables uit .env bestand
+dotenv.config();
 
-try {
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  const match = envContent.match(/VITE_OPENAI_API_KEY=([^\r\n]+)/);
-  if (match && match[1]) {
-    apiKey = match[1].trim();
-    console.log('API key succesvol geladen uit .env bestand');
-  } else {
-    console.error('Kon geen API key vinden in het .env bestand');
-  }
-} catch (error) {
-  console.error('Fout bij lezen .env bestand:', error);
+// Gebruik de environment variable direct
+const OPENAI_API_KEY = process.env.VITE_OPENAI_API_KEY;
+
+if (!OPENAI_API_KEY) {
+  console.error('VITE_OPENAI_API_KEY environment variable is niet ingesteld!');
 }
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Configureer multer voor het verwerken van bestandsuploads
-const upload = multer({ 
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 } // Max 10MB
+// Configureer multer voor het opslaan van audio bestanden
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  }
 });
 
-// Initialiseer OpenAI client met de API key uit het .env bestand
-const openai = new OpenAI({
-  apiKey: apiKey,
-});
+const upload = multer({ storage });
 
 // Endpoint voor spraak naar tekst (Whisper API)
 app.post('/transcribe', upload.single('file'), async (req, res) => {
@@ -46,52 +44,34 @@ app.post('/transcribe', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'Geen audio bestand ontvangen' });
     }
     
-    console.log('Audio bestand ontvangen, grootte:', req.file.size, 'bytes');
-    console.log('MIME type:', req.file.mimetype);
+    console.log('Audio bestand ontvangen:', req.file.path);
     
-    // Controleer of het bestand niet leeg is
-    if (req.file.size === 0) {
-      console.error('Audio bestand is leeg');
-      return res.status(400).json({ error: 'Audio bestand is leeg' });
+    const formData = new FormData();
+    formData.append('file', fs.createReadStream(req.file.path));
+    formData.append('model', 'whisper-1');
+    
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      body: formData
+    });
+    
+    if (!response.ok) {
+      throw new Error(`OpenAI API antwoordde met ${response.status}: ${response.statusText}`);
     }
     
-    try {
-      // Schrijf de buffer naar een tijdelijk bestand
-      const fs = require('fs');
-      const os = require('os');
-      const path = require('path');
-      
-      const tempDir = os.tmpdir();
-      const fileName = `recording-${Date.now()}.webm`;
-      const filePath = path.join(tempDir, fileName);
-      
-      fs.writeFileSync(filePath, req.file.buffer);
-      console.log('Audio tijdelijk opgeslagen in:', filePath);
-      
-      // Transcribeer de audio met de Whisper API
-      const transcription = await openai.audio.transcriptions.create({
-        file: fs.createReadStream(filePath),
-        model: req.body.model || 'whisper-1',
-        language: req.body.language || 'nl',
-        response_format: 'json'
-      });
-      
-      // Verwijder het tijdelijke bestand
-      fs.unlinkSync(filePath);
-      
-      console.log('Transcriptie voltooid:', transcription.text);
-      res.json(transcription);
-    } catch (apiError) {
-      console.error('OpenAI API fout bij transcriberen:', apiError);
-      
-      // Stuur een eenvoudige fallback response als de API faalt
-      res.json({
-        text: "Ik kon niet verstaan wat je zei. Kun je het nog eens proberen?"
-      });
-    }
+    const data = await response.json();
+    console.log('Transcriptie ontvangen:', data);
+    
+    // Verwijder het audio bestand na gebruik
+    fs.unlinkSync(req.file.path);
+    
+    res.json(data);
   } catch (error) {
     console.error('Fout bij transcriberen:', error);
-    res.status(500).json({ error: 'Kon audio niet transcriberen', details: error.message });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -106,25 +86,42 @@ app.post('/tts', async (req, res) => {
     
     console.log('TTS aanvraag ontvangen:', { text, voice, model, speed });
     
-    // Zet de tekst om naar spraak met de TTS API
-    const mp3 = await openai.audio.speech.create({
-      model: model || 'tts-1',
-      voice: voice || 'alloy',
-      input: text,
-      speed: speed || 1.0
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: model || 'tts-1',
+        input: text,
+        voice: voice || 'alloy'
+      })
     });
     
-    // Converteer de response naar een buffer
-    const buffer = Buffer.from(await mp3.arrayBuffer());
+    if (!response.ok) {
+      throw new Error(`OpenAI API antwoordde met ${response.status}: ${response.statusText}`);
+    }
     
-    // Stuur de audio terug
-    res.set('Content-Type', 'audio/mpeg');
-    res.send(buffer);
+    const audioBuffer = await response.arrayBuffer();
     
-    console.log('TTS voltooid, audio verzonden');
+    // Sla het audio bestand op
+    const dir = path.join(__dirname, 'audio');
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    
+    const filename = `${Date.now()}.mp3`;
+    const filepath = path.join(dir, filename);
+    
+    fs.writeFileSync(filepath, Buffer.from(audioBuffer));
+    
+    console.log('Audio opgeslagen:', filepath);
+    
+    res.json({ url: `/api/voice/audio/${filename}` });
   } catch (error) {
     console.error('Fout bij tekst naar spraak:', error);
-    res.status(500).json({ error: 'Kon tekst niet omzetten naar spraak', details: error.message });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -139,20 +136,44 @@ app.post('/chat', async (req, res) => {
     
     console.log('Chat aanvraag ontvangen:', { model, temperature, max_tokens });
     
-    // Genereer een antwoord met de GPT API
-    const completion = await openai.chat.completions.create({
-      model: model || 'gpt-4o',
-      messages,
-      temperature: temperature || 0.7,
-      max_tokens: max_tokens || 150
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: model || 'gpt-4o',
+        messages,
+        temperature: temperature || 0.7,
+        max_tokens: max_tokens || 150
+      })
     });
     
+    if (!response.ok) {
+      throw new Error(`OpenAI API antwoordde met ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
     console.log('Chat voltooid, antwoord verzonden');
-    res.json(completion);
+    
+    res.json(data);
   } catch (error) {
     console.error('Fout bij chat completion:', error);
-    res.status(500).json({ error: 'Kon geen antwoord genereren', details: error.message });
+    res.status(500).json({ error: error.message });
   }
+});
+
+// Endpoint voor het serveren van audio bestanden
+app.get('/audio/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const filepath = path.join(__dirname, 'audio', filename);
+  
+  if (!fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'Audio bestand niet gevonden' });
+  }
+  
+  res.sendFile(filepath);
 });
 
 // Start de server
