@@ -5,9 +5,10 @@
 const API_BASE_URL = '/api'; // Relatief pad voor productie
 const DEV_API_URL = 'http://localhost:3001'; // Lokale server tijdens ontwikkeling
 
-// Helper functie om de juiste API basis URL te bepalen
+// Helper functie om de API basis URL te krijgen
 const getApiBaseUrl = () => {
-  return import.meta.env.DEV ? DEV_API_URL : API_BASE_URL;
+  // Gebruik de basis URL uit de configuratie of de standaard '/api'
+  return '/api/voice';
 };
 
 // Functie om audio op te nemen van de microfoon
@@ -90,16 +91,14 @@ export const startRecording = async () => {
   }
 };
 
-// Functie om audio te transcriberen met Whisper API
+// Transcribeer audio met Whisper API
 export const transcribeAudio = async (audioBlob) => {
   try {
     console.log('Audio transcriberen...');
     
-    // Maak een FormData object met de audio blob
+    // Maak een FormData object met de audio
     const formData = new FormData();
-    formData.append('file', audioBlob, 'recording.webm');
-    formData.append('model', 'whisper-1');
-    formData.append('language', 'nl');
+    formData.append('file', audioBlob);
     
     // Stuur de audio naar de server
     const response = await fetch(`${getApiBaseUrl()}/transcribe`, {
@@ -115,7 +114,7 @@ export const transcribeAudio = async (audioBlob) => {
     console.log('Transcriptie ontvangen:', data.text);
     return data.text;
   } catch (error) {
-    console.error('Fout bij transcriberen:', error);
+    console.error('Fout bij transcriberen audio:', error);
     throw error;
   }
 };

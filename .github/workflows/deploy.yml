@@ -20,7 +20,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Set up Node
+      - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
@@ -29,19 +29,12 @@ jobs:
         run: npm ci
       - name: Create .env file
         run: |
-          echo "VITE_BASE_PATH=/" > .env
-          echo "# De OpenAI API key wordt tijdens runtime geïnjecteerd" >> .env
+          echo "VITE_BASE_PATH=/coliblanco-dashboard" > .env
+          # De API key wordt niet in de client code gebruikt
       - name: Build
-        env:
-          VITE_OPENAI_API_KEY: ${{ secrets.VITE_OPENAI_API_KEY }}
-          VITE_STT_PROVIDER: openai
-          VITE_TTS_PROVIDER: openai
-          VITE_LLM_PROVIDER: openai
         run: npm run build
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v2
+      - name: Deploy
+        uses: JamesIves/github-pages-deploy-action@v4
         with:
-          path: './dist'
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v2
+          folder: dist
+          branch: gh-pages

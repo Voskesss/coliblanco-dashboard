@@ -2,13 +2,16 @@
 // Vite laadt automatisch omgevingsvariabelen die beginnen met VITE_
 
 export const config = {
-  // OpenAI API key (in productie zou dit via een backend moeten gaan voor veiligheid)
-  openaiApiKey: import.meta.env.VITE_OPENAI_API_KEY,
+  // OpenAI API key wordt alleen op de server gebruikt, niet in de client
+  // In de client gebruiken we de server endpoints
   
   // Providers
   sttProvider: import.meta.env.VITE_STT_PROVIDER || 'openai',
   ttsProvider: import.meta.env.VITE_TTS_PROVIDER || 'openai',
   llmProvider: import.meta.env.VITE_LLM_PROVIDER || 'openai',
+  
+  // API endpoints
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '/api',
   
   // Model configuratie
   models: {
@@ -26,9 +29,7 @@ export const config = {
 export const validateConfig = () => {
   const missingConfig = [];
   
-  if (!config.openaiApiKey) {
-    missingConfig.push('VITE_OPENAI_API_KEY');
-  }
+  // We controleren niet meer op de API key omdat die alleen op de server wordt gebruikt
   
   return {
     isValid: missingConfig.length === 0,
