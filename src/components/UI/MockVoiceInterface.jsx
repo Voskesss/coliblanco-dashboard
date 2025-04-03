@@ -125,6 +125,7 @@ const FeedbackText = styled(motion.div)`
 
 const MockVoiceInterface = ({ onCommand }) => {
   const [isListening, setIsListening] = useState(false);
+  const [isContinuousMode, setIsContinuousMode] = useState(true); 
   const [feedback, setFeedback] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
   const [inputText, setInputText] = useState('');
@@ -132,36 +133,79 @@ const MockVoiceInterface = ({ onCommand }) => {
   const [audioElement, setAudioElement] = useState(null);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [audioChunks, setAudioChunks] = useState([]);
+  const [silenceTimer, setSilenceTimer] = useState(null);
+  const [lastAudioLevel, setLastAudioLevel] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
   const inputRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const streamRef = useRef(null);
   
   const { orbStatus } = useAppContext();
   
-  // Focus op het tekstinvoerveld wanneer het wordt weergegeven
   useEffect(() => {
     if (showTextInput && inputRef.current) {
       inputRef.current.focus();
     }
   }, [showTextInput]);
   
-  // Initialiseer de mediaRecorder
   useEffect(() => {
-    // Cleanup functie voor als de component unmount
+    if (isContinuousMode) {
+      startContinuousListening();
+    }
+    
     return () => {
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-      }
-      if (audioElement) {
-        audioElement.pause();
-        audioElement.src = '';
-      }
+      cleanupAudioResources();
     };
-  }, [mediaRecorder, audioElement]);
+  }, [isContinuousMode]);
   
-  // Start de opname van audio
-  const startRecording = async () => {
+  const cleanupAudioResources = () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+    }
+    
+    if (audioElement) {
+      audioElement.pause();
+      audioElement.src = '';
+    }
+    
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+    }
+    
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(err => console.error('Fout bij sluiten audioContext:', err));
+    }
+  };
+  
+  const startContinuousListening = async () => {
     try {
-      setAudioChunks([]);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
+      
+      streamRef.current = stream;
+      
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      audioContextRef.current = audioContext;
+      
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      
+      monitorAudioLevels();
+      
       const recorder = new MediaRecorder(stream);
       
       recorder.ondataavailable = (e) => {
@@ -171,91 +215,163 @@ const MockVoiceInterface = ({ onCommand }) => {
       };
       
       recorder.onstop = async () => {
-        // Stop alle tracks in de stream om de microfoon vrij te geven
-        stream.getTracks().forEach(track => track.stop());
-        
-        if (audioChunks.length > 0) {
-          // Verwerk de opgenomen audio
+        if (!isProcessing && audioChunks.length > 0) {
           await processRecordedAudio();
         }
       };
       
-      recorder.start();
       setMediaRecorder(recorder);
       setIsListening(true);
-      setFeedback('Luisteren...');
+      
+      startRecording(recorder);
+      
     } catch (error) {
-      console.error('Fout bij het starten van de opname:', error);
+      console.error('Fout bij het starten van continue luisteren:', error);
       setFeedback('Kon de microfoon niet gebruiken. Controleer je browser-instellingen.');
       setTimeout(() => setFeedback(''), 3000);
     }
   };
   
-  // Stop de opname van audio
+  const monitorAudioLevels = () => {
+    if (!analyserRef.current || !audioContextRef.current) return;
+    
+    const analyser = analyserRef.current;
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    
+    const checkAudioLevel = () => {
+      if (!analyserRef.current) return;
+      
+      analyser.getByteFrequencyData(dataArray);
+      
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / dataArray.length;
+      setLastAudioLevel(average);
+      
+      if (isListening && !isProcessing && !isSpeaking) {
+        if (average > 15) { 
+          if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            setSilenceTimer(null);
+          }
+        } else if (!silenceTimer && mediaRecorder && mediaRecorder.state === 'recording' && audioChunks.length > 0) {
+          const timer = setTimeout(() => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+              stopRecording();
+            }
+          }, 1500); 
+          
+          setSilenceTimer(timer);
+        }
+      }
+      
+      requestAnimationFrame(checkAudioLevel);
+    };
+    
+    checkAudioLevel();
+  };
+  
+  const startRecording = (recorder = mediaRecorder) => {
+    if (!recorder || recorder.state === 'recording') return;
+    
+    setAudioChunks([]);
+    recorder.start();
+    setIsListening(true);
+    
+    if (!isContinuousMode) {
+      setFeedback('Luisteren...');
+    }
+  };
+  
   const stopRecording = () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
       mediaRecorder.stop();
       setIsListening(false);
-      setFeedback('Verwerken van je spraak...');
+      
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        setSilenceTimer(null);
+      }
+      
+      if (!isProcessing) {
+        setFeedback('Verwerken van je spraak...');
+      }
     }
   };
   
-  // Verwerk de opgenomen audio
   const processRecordedAudio = async () => {
+    if (isProcessing || audioChunks.length === 0) return;
+    
+    setIsProcessing(true);
+    
     try {
-      // Maak een blob van de opgenomen audiochunks
       const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
       
       console.log('Audio opgenomen, type:', audioBlob.type, 'grootte:', audioBlob.size, 'bytes');
       
-      // Verwerk de audio met de speech-to-speech functie
-      setFeedback('Verwerken van je spraak...');
+      if (audioBlob.size < 1000) {
+        console.warn('Audio opname te klein, waarschijnlijk geen spraak');
+        setIsProcessing(false);
+        
+        if (isContinuousMode && mediaRecorder) {
+          startRecording();
+        }
+        
+        return;
+      }
+      
       const result = await processSpeechToSpeech(audioBlob);
       
-      // Toon de transcriptie en het antwoord
       setFeedback(`Jij: "${result.transcription}"
 AI: "${result.response}"`);
       
-      // Stuur het commando door naar de parent component
       if (onCommand) {
         onCommand(result.response);
       }
       
-      // Speel het antwoord af
-      playAudio(result.audioUrl);
+      await playAudio(result.audioUrl);
       
-      // Reset na een tijdje
       setTimeout(() => {
         setFeedback('');
-      }, 10000);
+        setIsProcessing(false);
+        
+        if (isContinuousMode && mediaRecorder) {
+          startRecording();
+        }
+      }, 1000);
     } catch (error) {
       console.error('Fout bij het verwerken van de opgenomen audio:', error);
       setFeedback('Er is een fout opgetreden bij het verwerken van je spraak.');
-      setTimeout(() => setFeedback(''), 3000);
+      
+      setTimeout(() => {
+        setFeedback('');
+        setIsProcessing(false);
+        
+        if (isContinuousMode && mediaRecorder) {
+          startRecording();
+        }
+      }, 3000);
     }
   };
   
-  // Speel audio af
-  const playAudio = (url) => {
+  const playAudio = async (url) => {
     try {
-      // Stop eventuele lopende audio
       if (audioElement) {
         audioElement.pause();
         audioElement.src = '';
       }
       
-      // Controleer of de URL geldig is
       if (!url || url === 'dummy-audio-url') {
         console.warn('Ongeldige audio URL ontvangen');
         setIsSpeaking(false);
         return;
       }
       
-      // Maak een nieuw audio element
       const audio = new Audio(url);
       setAudioElement(audio);
       
-      // Vind de orb via DOM en animeer deze
       const orbElement = document.querySelector('.orb-ref');
       if (orbElement && orbElement.__reactFiber$) {
         const orbInstance = orbElement.__reactFiber$.return.stateNode;
@@ -266,11 +382,10 @@ AI: "${result.response}"`);
       
       setIsSpeaking(true);
       
-      // Voeg event handlers toe
       audio.onended = () => {
         setIsSpeaking(false);
         if (url.startsWith('blob:')) {
-          URL.revokeObjectURL(url); // Ruim de blob URL op
+          URL.revokeObjectURL(url); 
         }
       };
       
@@ -279,10 +394,19 @@ AI: "${result.response}"`);
         setIsSpeaking(false);
       };
       
-      // Start het afspelen
-      audio.play().catch(error => {
+      await audio.play().catch(error => {
         console.error('Fout bij het afspelen van audio:', error);
         setIsSpeaking(false);
+      });
+      
+      return new Promise((resolve) => {
+        audio.onended = () => {
+          setIsSpeaking(false);
+          if (url.startsWith('blob:')) {
+            URL.revokeObjectURL(url); 
+          }
+          resolve();
+        };
       });
     } catch (error) {
       console.error('Fout bij het afspelen van audio:', error);
@@ -290,19 +414,23 @@ AI: "${result.response}"`);
     }
   };
   
-  // Toggle de microfoon
   const handleToggleMicrophone = () => {
-    // Sluit tekstinvoer als die open is
     setShowTextInput(false);
     
+    setIsContinuousMode(!isContinuousMode);
+    
     if (!isListening) {
-      startRecording();
+      if (!isContinuousMode) {
+        startContinuousListening();
+      } else {
+        startRecording();
+      }
     } else {
       stopRecording();
+      cleanupAudioResources();
     }
   };
   
-  // Toon of verberg het tekstinvoerveld
   const toggleTextInput = () => {
     setShowTextInput(!showTextInput);
     if (isListening) {
@@ -310,7 +438,6 @@ AI: "${result.response}"`);
     }
   };
   
-  // Verwerk de tekstinvoer
   const handleSendText = async () => {
     if (inputText.trim() === '') return;
     
@@ -318,29 +445,27 @@ AI: "${result.response}"`);
     setFeedback(`Verwerken van "${userText}"...`);
     
     try {
-      // Verwerk de tekst met het LLM en zet het antwoord om naar spraak
       const result = await processSpeechToSpeech(null, { userText });
       
-      // Toon het antwoord
       setFeedback(`Jij: "${userText}"
 AI: "${result.response}"`);
       
-      // Stuur het commando door naar de parent component
       if (onCommand) {
         onCommand(result.response);
       }
       
-      // Speel het antwoord af
-      playAudio(result.audioUrl);
+      await playAudio(result.audioUrl);
       
-      // Reset de input
       setInputText('');
       
-      // Reset na een tijdje
       setTimeout(() => {
         setFeedback('');
         setShowTextInput(false);
-      }, 10000);
+        
+        if (isContinuousMode && mediaRecorder) {
+          startRecording();
+        }
+      }, 1000);
     } catch (error) {
       console.error('Fout bij het verwerken van tekst:', error);
       setFeedback('Er is een fout opgetreden bij het verwerken van je bericht.');
@@ -350,7 +475,6 @@ AI: "${result.response}"`);
     }
   };
   
-  // Verwerk Enter toets in het tekstinvoerveld
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
       handleSendText();
