@@ -203,6 +203,8 @@ const MockVoiceInterface = ({ onCommand }) => {
   
   // Initialiseer de mediaRecorder en start automatisch met luisteren
   useEffect(() => {
+    let isActive = true;
+    
     // Start automatisch met luisteren als de component wordt geladen
     if (isContinuousMode) {
       startContinuousListening();
@@ -210,9 +212,151 @@ const MockVoiceInterface = ({ onCommand }) => {
     
     // Cleanup functie voor als de component unmount
     return () => {
+      isActive = false;
       cleanupAudioResources();
     };
   }, [isContinuousMode]);
+  
+  // Cleanup audio resources
+  const cleanupAudioResources = () => {
+    console.log('Cleaning up audio resources');
+    try {
+      // Stop de mediaRecorder als deze nog bezig is
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        try {
+          mediaRecorder.stop();
+        } catch (err) {
+          console.error('Fout bij stoppen mediaRecorder:', err);
+        }
+      }
+      
+      // Stop eventuele lopende audio
+      if (audioElement) {
+        try {
+          audioElement.pause();
+          audioElement.src = '';
+        } catch (err) {
+          console.error('Fout bij stoppen audio element:', err);
+        }
+      }
+      
+      // Wis eventuele timers
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        setSilenceTimer(null);
+      }
+      
+      // Stop alle tracks in de mediaStream
+      if (streamRef.current) {
+        try {
+          const tracks = streamRef.current.getTracks();
+          tracks.forEach(track => {
+            try {
+              track.stop();
+            } catch (err) {
+              console.error('Fout bij stoppen track:', err);
+            }
+          });
+          streamRef.current = null;
+        } catch (err) {
+          console.error('Fout bij stoppen mediaStream:', err);
+        }
+      }
+      
+      // Sluit de AudioContext als deze nog open is
+      if (audioContextRef.current) {
+        try {
+          // Controleer eerst de status
+          if (audioContextRef.current.state !== 'closed') {
+            audioContextRef.current.close()
+              .then(() => console.log('AudioContext succesvol gesloten'))
+              .catch(err => console.error('Fout bij sluiten audioContext:', err));
+          } else {
+            console.log('AudioContext was al gesloten');
+          }
+        } catch (err) {
+          console.error('Fout bij toegang tot audioContext:', err);
+        } finally {
+          audioContextRef.current = null;
+        }
+      }
+      
+      // Reset de state
+      setIsListening(false);
+      setIsProcessing(false);
+      setIsSpeaking(false);
+      setAudioChunks([]);
+    } catch (err) {
+      console.error('Algemene fout bij cleanup:', err);
+    }
+  };
+  
+  // Start continue luisteren modus
+  const startContinuousListening = async () => {
+    try {
+      // Maak eerst schoon om dubbele resources te voorkomen
+      cleanupAudioResources();
+      
+      // Vraag toestemming voor microfoon
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
+      
+      // Sla de stream op in de ref
+      streamRef.current = stream;
+      
+      // Maak een nieuwe AudioContext
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContextRef.current = audioContext;
+        
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        analyserRef.current = analyser;
+        
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        
+        // Start met luisteren naar geluidsniveaus
+        monitorAudioLevels();
+      } catch (err) {
+        console.error('Fout bij maken van AudioContext:', err);
+      }
+      
+      // Maak een nieuwe MediaRecorder
+      try {
+        const recorder = new MediaRecorder(stream);
+        
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            setAudioChunks((chunks) => [...chunks, e.data]);
+          }
+        };
+        
+        recorder.onstop = async () => {
+          if (!isProcessing && audioChunks.length > 0) {
+            await processRecordedAudio();
+          }
+        };
+        
+        setMediaRecorder(recorder);
+        setIsListening(true);
+        
+        // Start de recorder
+        startRecording(recorder);
+      } catch (err) {
+        console.error('Fout bij maken van MediaRecorder:', err);
+      }
+    } catch (error) {
+      console.error('Fout bij het starten van continue luisteren:', error);
+      setFeedback('Kon de microfoon niet gebruiken. Controleer je browser-instellingen.');
+      setTimeout(() => setFeedback(''), 3000);
+    }
+  };
   
   // Update status message based on state
   useEffect(() => {
@@ -226,86 +370,6 @@ const MockVoiceInterface = ({ onCommand }) => {
       setStatusMessage('');
     }
   }, [isProcessing, isSpeaking, isListening]);
-  
-  // Cleanup audio resources
-  const cleanupAudioResources = () => {
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-      mediaRecorder.stop();
-    }
-    
-    if (audioElement) {
-      audioElement.pause();
-      audioElement.src = '';
-    }
-    
-    if (silenceTimer) {
-      clearTimeout(silenceTimer);
-    }
-    
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-    }
-    
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(err => console.error('Fout bij sluiten audioContext:', err));
-    }
-  };
-  
-  // Start continue luisteren modus
-  const startContinuousListening = async () => {
-    try {
-      // Vraag toestemming voor microfoon
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { 
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        } 
-      });
-      
-      streamRef.current = stream;
-      
-      // Maak een AudioContext voor het analyseren van geluidsniveaus
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      audioContextRef.current = audioContext;
-      
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-      
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-      
-      // Start met luisteren naar geluidsniveaus
-      monitorAudioLevels();
-      
-      // Maak een nieuwe MediaRecorder, maar start deze nog niet
-      const recorder = new MediaRecorder(stream);
-      
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          setAudioChunks((chunks) => [...chunks, e.data]);
-        }
-      };
-      
-      recorder.onstop = async () => {
-        if (!isProcessing && audioChunks.length > 0) {
-          await processRecordedAudio();
-        }
-      };
-      
-      setMediaRecorder(recorder);
-      setIsListening(true);
-      
-      // Start de recorder
-      startRecording(recorder);
-      
-    } catch (error) {
-      console.error('Fout bij het starten van continue luisteren:', error);
-      setFeedback('Kon de microfoon niet gebruiken. Controleer je browser-instellingen.');
-      setTimeout(() => setFeedback(''), 3000);
-    }
-  };
   
   // Monitor geluidsniveaus om te detecteren wanneer iemand spreekt
   const monitorAudioLevels = () => {
