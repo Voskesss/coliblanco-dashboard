@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from '@emotion/styled';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaStop, FaVolumeUp, FaPaperPlane, FaSpinner, FaVolumeMute, FaChevronUp } from 'react-icons/fa';
+import { FaStop, FaVolumeUp, FaPaperPlane, FaSpinner, FaVolumeMute, FaChevronUp, FaMicrophone } from 'react-icons/fa';
 import { BsSoundwave } from 'react-icons/bs';
 import { textToSpeech, processWithLLM, transcribeAudio } from '../../utils/openai';
 
@@ -16,23 +16,24 @@ const VoiceContainer = styled.div`
 `;
 
 const MicButton = styled(motion.button)`
-  width: 64px;
-  height: 64px;
+  width: 120px;
+  height: 120px;
   border-radius: 50%;
-  background-color: ${props => props.isListening ? '#FF9800' : 'rgba(255, 255, 255, 0.7)'};
+  background-color: ${props => props.isListening ? '#FF9800' : 'rgba(255, 255, 255, 0.9)'};
   border: none;
   display: flex;
   justify-content: center;
   align-items: center;
   cursor: pointer;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
   color: ${props => props.isListening ? 'white' : '#333'};
-  font-size: 1.5rem;
+  font-size: 1.8rem;
   transition: background-color 0.3s ease;
   position: relative;
   
   &:hover {
-    background-color: ${props => props.isListening ? '#F57C00' : 'rgba(255, 255, 255, 0.9)'};
+    background-color: ${props => props.isListening ? '#F57C00' : 'rgba(255, 255, 255, 1)'};
+    transform: scale(1.05);
   }
   
   &:disabled {
@@ -80,14 +81,15 @@ const SendButton = styled(motion.button)`
   background-color: #FF9800;
   border: none;
   color: white;
-  width: 40px;
-  height: 40px;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
   display: flex;
   justify-content: center;
   align-items: center;
   cursor: pointer;
   transition: bottom 0.3s ease;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
 `;
 
 const AudioControls = styled(motion.div)`
@@ -652,11 +654,11 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
         onClick={handleToggleMicrophone}
         disabled={isProcessing && !isListening}
         isListening={isListening}
-        whileHover={{ scale: 1.1 }}
+        whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.9 }}
         title={isListening ? "Stop met luisteren" : "Start met luisteren"}
       >
-        {isListening ? <FaStop size={40} /> : <BsSoundwave size={60} />}
+        {isListening ? <FaStop size={65} /> : <BsSoundwave size={70} />}
         <StatusIndicator
           isListening={isListening}
           isProcessing={isProcessing}
@@ -711,7 +713,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
           whileTap={{ scale: 0.95 }}
           expanded={expanded}
         >
-          <FaPaperPlane />
+          <FaPaperPlane size={30} />
         </SendButton>
       </TextInputContainer>
     </VoiceContainer>
