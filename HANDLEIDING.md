@@ -56,8 +56,20 @@ npm run dev
 1. Open de applicatie in je browser (meestal op http://localhost:5173)
 2. Klik op de microfoonknop om te beginnen met spreken
 3. Spreek duidelijk in je microfoon
-4. Klik nogmaals op de knop om te stoppen met spreken
+4. **Nieuw:** Je hoeft niet meer op de knop te klikken om te stoppen met spreken. De interface detecteert automatisch wanneer je klaar bent met spreken (na ongeveer 1,5 seconde stilte)
 5. Wacht op het antwoord van de assistent
+
+### 5. Gespreksmodus gebruiken
+
+De spraakinterface heeft nu een gespreksmodus waarmee je een doorlopend gesprek kunt voeren zonder telkens op de microfoonknop te hoeven drukken:
+
+1. Klik op de gespreksknop (het praatballonnetje) om de gespreksmodus in te schakelen
+2. Spreek duidelijk in je microfoon
+3. Stop met praten wanneer je klaar bent met je vraag (de interface detecteert automatisch stilte)
+4. Na je vraag zal de assistent automatisch antwoorden
+5. Nadat de assistent klaar is met spreken, begint de microfoon automatisch weer met luisteren
+6. Je kunt blijven praten zonder op knoppen te drukken
+7. Klik nogmaals op de gespreksknop om de gespreksmodus uit te schakelen
 
 ## Problemen oplossen
 
@@ -83,3 +95,20 @@ node realtime-token.js
 ### Ik krijg een foutmelding over de microfoon
 
 Zorg ervoor dat je browser toestemming heeft om je microfoon te gebruiken. Controleer de instellingen van je browser en geef toestemming wanneer daarom wordt gevraagd.
+
+### De stiltedetectie werkt niet goed
+
+Als de stiltedetectie niet goed werkt:
+
+- Zorg ervoor dat je in een rustige omgeving bent met weinig achtergrondgeluid
+- Spreek duidelijk en pauzeer duidelijk aan het einde van je vraag
+- Als de stiltedetectie te snel of te langzaam reageert, kun je nog steeds handmatig op de microfoonknop klikken
+
+### De gespreksmodus werkt niet goed
+
+Als de gespreksmodus niet goed werkt:
+
+- Zorg ervoor dat je in een rustige omgeving bent met weinig achtergrondgeluid
+- Wacht tot de assistent helemaal klaar is met spreken voordat je weer begint te praten
+- Als de microfoon niet automatisch weer aangaat, kun je de gespreksmodus uit- en weer inschakelen
+- Je kunt nog steeds de microfoonknop gebruiken om handmatig te beginnen en te stoppen met luisteren

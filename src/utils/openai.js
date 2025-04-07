@@ -107,86 +107,67 @@ export const processWithLLM = async (text, context = {}) => {
 // Echte functie voor tekst naar spraak conversie met OpenAI
 export const textToSpeech = async (text, instructions = null) => {
   try {
+    console.log('Tekst naar spraak omzetten met TTS...');
+    
     // Controleer of we een geldige API key hebben
     if (!config.openaiApiKey) {
-      console.warn('Geen OpenAI API key gevonden, gebruik browser spraaksynthese als fallback');
+      console.warn('Geen OpenAI API key gevonden, gebruik browser TTS');
       return useBrowserTTS(text);
     }
     
-    console.log('OpenAI TTS aanroepen met stem:', config.models.openai.ttsVoice);
+    // Bereid de aanvraag voor
+    const requestOptions = {
+      model: config.models.openai.tts,
+      voice: 'ash',
+      speed: 1.0,
+      input: text
+    };
     
-    // Gebruik OpenAI's nieuwe streaming TTS API
-    const audioElement = document.createElement('audio');
-    audioElement.controls = true;
+    // Voeg instructies toe als die er zijn
+    if (instructions) {
+      requestOptions.instructions = instructions;
+    } else {
+      // Standaard instructies als er geen zijn opgegeven
+      requestOptions.instructions = "Personality/affect: a high-energy cheerleader helping with administrative tasks\n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
+    }
     
-    // Maak een nieuwe ReadableStream voor de audio data
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          // Bereid de parameters voor
-          const params = {
-            model: config.models.openai.tts || 'gpt-4o-mini-tts',
-            voice: config.models.openai.ttsVoice || 'alloy',
-            input: text,
-            response_format: 'mp3',
-          };
-          
-          // Voeg instructies toe als die zijn opgegeven
-          if (instructions) {
-            params.instructions = instructions;
-          }
-          
-          // Maak een streaming aanvraag naar de OpenAI API
-          const response = await fetch('https://api.openai.com/v1/audio/speech', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${config.openaiApiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(params),
-          });
-          
-          if (!response.ok) {
-            throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
-          }
-          
-          // Lees de response als een ReadableStream
-          const reader = response.body.getReader();
-          
-          // Verwerk de chunks van de stream
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            controller.enqueue(value);
-          }
-          
-          controller.close();
-        } catch (error) {
-          console.error('Fout bij het streamen van audio:', error);
-          controller.error(error);
-        }
-      }
+    console.log('TTS aanvraag versturen met stem:', requestOptions.voice);
+    console.log('Steminstructies:', requestOptions.instructions);
+    
+    // Maak een response object met de juiste headers voor streaming
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.openaiApiKey}`
+      },
+      body: JSON.stringify(requestOptions)
     });
     
-    // Converteer de stream naar een blob
-    const response = new Response(stream);
-    const blob = await response.blob();
+    if (!response.ok) {
+      throw new Error(`OpenAI API antwoordde met ${response.status}: ${response.statusText}`);
+    }
     
-    // Maak een URL van de blob
-    const url = URL.createObjectURL(blob);
+    // Haal de audio blob op
+    const audioBlob = await response.blob();
     
-    // Stel de audio source in
-    audioElement.src = url;
+    // Maak een URL voor de audio blob
+    const audioUrl = URL.createObjectURL(audioBlob);
     
-    // Speel de audio automatisch af als dat gewenst is
-    // audioElement.play();
+    console.log('Audio URL gemaakt:', audioUrl);
     
-    return url;
+    // Preload de audio om sneller te kunnen afspelen
+    const audio = new Audio(audioUrl);
+    audio.preload = 'auto';
+    await new Promise(resolve => {
+      audio.oncanplaythrough = resolve;
+      audio.load();
+    });
+    
+    return audioUrl;
   } catch (error) {
-    console.error('Fout bij het aanroepen van OpenAI TTS API:', error);
-    console.warn('Terugvallen op browser spraaksynthese');
-    
-    // Gebruik browser spraaksynthese als fallback
+    console.error('Fout bij tekst naar spraak conversie:', error);
+    // Gebruik browser TTS als fallback
     return useBrowserTTS(text);
   }
 };
@@ -245,7 +226,7 @@ export const processSpeechToSpeech = async (audioBlob, context = {}) => {
     const quickAcknowledgement = "Ik denk na over je vraag...";
     
     // Optionele instructies voor de stem
-    const voiceInstructions = context.voiceInstructions || "Spreek op een natuurlijke, vriendelijke toon. Gebruik een rustig tempo en duidelijke articulatie.";
+    const voiceInstructions = context.voiceInstructions || "Personality/affect: a high-energy cheerleader helping with administrative tasks \n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
     
     // Gebruik de nieuwe textToSpeech functie met instructies
     const quickAudioPromise = textToSpeech(quickAcknowledgement, voiceInstructions);
