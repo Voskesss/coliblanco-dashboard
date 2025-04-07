@@ -5,7 +5,6 @@ import { nl } from 'date-fns/locale';
 import logo from '../../components/UI/logo-coliblanco.png';
 import PulsingOrb from '../UI/PulsingOrb';
 import ContextCards from './ContextCards';
-import MockVoiceInterface from '../UI/MockVoiceInterface';
 import RealtimeVoiceInterface from '../UI/RealtimeVoiceInterface';
 import { useAppContext } from '../../context/AppContext';
 import { motion } from 'framer-motion';
@@ -79,28 +78,8 @@ const MessageContainer = styled.div`
   }
 `;
 
-const InterfaceToggle = styled.button`
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  background-color: rgba(255, 255, 255, 0.7);
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  transition: all 0.2s ease;
-  
-  &:hover {
-    background-color: rgba(255, 255, 255, 0.9);
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
-  }
-`;
-
 const Dashboard = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [useRealtime, setUseRealtime] = useState(true);
   const { 
     orbStatus, 
     showCards, 
@@ -163,17 +142,8 @@ const Dashboard = () => {
   const formattedDay = format(currentTime, 'EEEE', { locale: nl });
   const formattedDate = format(currentTime, 'd MMMM', { locale: nl });
   
-  // Toggle tussen mock en realtime interface
-  const toggleInterface = () => {
-    setUseRealtime(!useRealtime);
-  };
-  
   return (
     <DashboardContainer>
-      <InterfaceToggle onClick={toggleInterface}>
-        {useRealtime ? 'Gebruik Mock Interface' : 'Gebruik Realtime Interface'}
-      </InterfaceToggle>
-      
       <Header>
         <Logo
           ref={logoRef}
@@ -200,11 +170,7 @@ const Dashboard = () => {
         {showCards && <ContextCards />}
       </MainContent>
       
-      {useRealtime ? (
-        <RealtimeVoiceInterface onCommand={processCommand} />
-      ) : (
-        <MockVoiceInterface onCommand={processCommand} />
-      )}
+      <RealtimeVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
     </DashboardContainer>
   );
 };

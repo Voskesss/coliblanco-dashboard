@@ -13,10 +13,29 @@ async function getEphemeralToken() {
       : '/api/session'; // In productie zou dit een relatief pad kunnen zijn of een Azure functie URL
     
     console.log('Ephemeral token ophalen van:', serverUrl);
+    
+    // Controleer eerst of de server bereikbaar is
+    try {
+      const checkResponse = await fetch(serverUrl, { method: 'HEAD' });
+      if (!checkResponse.ok) {
+        throw new Error(`Server niet bereikbaar: ${checkResponse.status}`);
+      }
+    } catch (error) {
+      throw new Error(`Server niet bereikbaar. Zorg ervoor dat de realtime-token.js server draait op poort 3001. Fout: ${error.message}`);
+    }
+    
     const response = await fetch(serverUrl);
     if (!response.ok) {
       throw new Error(`Server antwoordde met ${response.status}: ${response.statusText}`);
     }
+    
+    // Controleer of de response JSON is
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      throw new Error(`Ongeldige response van server: Verwachtte JSON maar kreeg ${contentType}. Response: ${text.substring(0, 100)}...`);
+    }
+    
     const data = await response.json();
     console.log('Ephemeral token ontvangen:', data);
     return data.client_secret.value;
@@ -28,12 +47,224 @@ async function getEphemeralToken() {
 
 // Functie om een WebRTC sessie op te zetten met de OpenAI Realtime API
 export const setupRealtimeSession = async (options = {}) => {
-  // Altijd de mock implementatie gebruiken omdat de echte API nog niet beschikbaar is
-  console.log('Gebruik mock implementatie omdat de echte API nog niet beschikbaar is');
-  return setupMockRealtimeSession(options);
+  try {
+    console.log('Realtime sessie opzetten met WebRTC...');
+    
+    // Haal een ephemeral token op van de server
+    const token = await getEphemeralToken();
+    console.log('Ephemeral token ontvangen, verbinding maken met Realtime API...');
+    
+    // Maak een WebRTC verbinding met de OpenAI Realtime API
+    const peerConnection = new RTCPeerConnection();
+    
+    // Maak een data channel voor het verzenden van berichten
+    const dataChannel = peerConnection.createDataChannel('events');
+    dataChannel.binaryType = 'arraybuffer';
+    
+    // Stel de data channel event handlers in
+    dataChannel.onopen = () => {
+      console.log('Data channel geopend');
+      if (options.onOpen) options.onOpen();
+    };
+    
+    dataChannel.onclose = () => {
+      console.log('Data channel gesloten');
+      if (options.onClose) options.onClose();
+    };
+    
+    dataChannel.onerror = (error) => {
+      console.error('Data channel fout:', error);
+      if (options.onError) options.onError(error);
+    };
+    
+    // Verwerk berichten van de server
+    dataChannel.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log('Bericht ontvangen:', message);
+        
+        // Verwerk verschillende soorten berichten
+        switch (message.type) {
+          case 'transcript.delta':
+            if (options.onTranscriptDelta) options.onTranscriptDelta(message.delta.text);
+            break;
+          case 'transcript.complete':
+            if (options.onTranscriptComplete) options.onTranscriptComplete(message.transcript);
+            break;
+          case 'response.delta':
+            if (options.onTextDelta) options.onTextDelta(message.delta.text);
+            break;
+          case 'response.audio.delta':
+            if (options.onAudioDelta) options.onAudioDelta(message.delta.audio);
+            break;
+          case 'response.done':
+            if (options.onResponseDone) options.onResponseDone(message);
+            break;
+          case 'speech.started':
+            if (options.onSpeechStart) options.onSpeechStart();
+            break;
+          case 'speech.ended':
+            if (options.onSpeechEnd) options.onSpeechEnd();
+            break;
+          default:
+            console.log('Onbekend berichttype:', message.type);
+        }
+      } catch (error) {
+        console.error('Fout bij verwerken bericht:', error);
+      }
+    };
+    
+    // Maak een offer en stuur deze naar de server
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    
+    // Stuur de offer naar de OpenAI Realtime API
+    const response = await fetch(`${REALTIME_API_URL}/webrtc`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        model: options.model || REALTIME_MODEL,
+        voice: options.voice || 'alloy',
+        sdp: offer.sdp,
+        type: offer.type
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`OpenAI API antwoordde met ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    // Stel het antwoord in als remote description
+    await peerConnection.setRemoteDescription({
+      type: 'answer',
+      sdp: data.sdp
+    });
+    
+    console.log('WebRTC verbinding opgezet');
+    
+    // Maak een audio element voor het afspelen van audio
+    const audioElement = document.createElement('audio');
+    audioElement.autoplay = true;
+    
+    // Voeg audio tracks toe aan de audio element
+    peerConnection.ontrack = (event) => {
+      console.log('Audio track ontvangen');
+      audioElement.srcObject = new MediaStream([event.track]);
+    };
+    
+    // Functie om te beginnen met luisteren
+    const startListening = async () => {
+      try {
+        console.log('Start luisteren...');
+        
+        // Vraag toegang tot de microfoon
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Voeg de audio tracks toe aan de peer connection
+        stream.getAudioTracks().forEach(track => {
+          peerConnection.addTrack(track, stream);
+        });
+        
+        console.log('Microfoon toegevoegd aan WebRTC verbinding');
+        
+        // Stuur een bericht naar de server om te beginnen met luisteren
+        dataChannel.send(JSON.stringify({
+          type: 'microphone.start'
+        }));
+        
+        return stream;
+      } catch (error) {
+        console.error('Fout bij starten luisteren:', error);
+        throw error;
+      }
+    };
+    
+    // Functie om te stoppen met luisteren
+    const stopListening = (stream) => {
+      try {
+        console.log('Stop luisteren...');
+        
+        // Stop alle tracks in de stream
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Stuur een bericht naar de server om te stoppen met luisteren
+        dataChannel.send(JSON.stringify({
+          type: 'microphone.stop'
+        }));
+        
+        console.log('Microfoon gestopt');
+      } catch (error) {
+        console.error('Fout bij stoppen luisteren:', error);
+        throw error;
+      }
+    };
+    
+    // Functie om een tekstbericht te versturen
+    const sendMessage = (text) => {
+      try {
+        console.log('Tekstbericht versturen:', text);
+        
+        // Stuur een bericht naar de server
+        dataChannel.send(JSON.stringify({
+          type: 'conversation.item.create',
+          item: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: text
+              }
+            ]
+          }
+        }));
+        
+        console.log('Tekstbericht verstuurd');
+      } catch (error) {
+        console.error('Fout bij versturen tekstbericht:', error);
+        throw error;
+      }
+    };
+    
+    // Functie om de verbinding te sluiten
+    const close = () => {
+      try {
+        console.log('Verbinding sluiten...');
+        
+        // Sluit de data channel
+        dataChannel.close();
+        
+        // Sluit de peer connection
+        peerConnection.close();
+        
+        console.log('Verbinding gesloten');
+      } catch (error) {
+        console.error('Fout bij sluiten verbinding:', error);
+      }
+    };
+    
+    // Geef de sessie terug
+    return {
+      startListening,
+      stopListening,
+      sendMessage,
+      close
+    };
+  } catch (error) {
+    console.error('Fout bij opzetten Realtime sessie:', error);
+    // Gooi de fout door in plaats van terug te vallen op de mock implementatie
+    throw new Error(`Fout bij opzetten Realtime sessie: ${error.message}`);
+  }
 };
 
 // Mock implementatie voor ontwikkeling en testen
+// Deze functie wordt niet meer automatisch gebruikt als fallback
 const setupMockRealtimeSession = (options = {}) => {
   console.log('Mock Realtime sessie opzetten');
   

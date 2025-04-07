@@ -3,7 +3,8 @@ import { config } from './config';
 
 // Initialiseer de OpenAI client
 const openai = new OpenAI({
-  apiKey: config.openaiApiKey,
+  // Gebruik de API key alleen als die beschikbaar is
+  apiKey: config.openaiApiKey || 'dummy-key',
   dangerouslyAllowBrowser: true // Sta toe dat de client in de browser draait (let op: alleen voor ontwikkeling)
 });
 
@@ -51,8 +52,8 @@ export const transcribeAudio = async (audioBlob) => {
     console.log('Transcriptie ontvangen:', transcription.text);
     return transcription.text;
   } catch (error) {
-    console.error('Fout bij het transcriberen van audio:', error);
-    return "Er is een fout opgetreden bij het transcriberen van de audio.";
+    console.error('Fout bij transcriberen:', error);
+    return "Er is een fout opgetreden bij het transcriberen. Dit is een gesimuleerde transcriptie.";
   }
 };
 
@@ -104,7 +105,7 @@ export const processWithLLM = async (text, context = {}) => {
 };
 
 // Echte functie voor tekst naar spraak conversie met OpenAI
-export const textToSpeech = async (text) => {
+export const textToSpeech = async (text, instructions = null) => {
   try {
     // Controleer of we een geldige API key hebben
     if (!config.openaiApiKey) {
@@ -114,21 +115,71 @@ export const textToSpeech = async (text) => {
     
     console.log('OpenAI TTS aanroepen met stem:', config.models.openai.ttsVoice);
     
-    // Gebruik OpenAI's TTS API
-    const mp3 = await openai.audio.speech.create({
-      model: config.models.openai.tts,
-      voice: config.models.openai.ttsVoice,
-      input: text,
+    // Gebruik OpenAI's nieuwe streaming TTS API
+    const audioElement = document.createElement('audio');
+    audioElement.controls = true;
+    
+    // Maak een nieuwe ReadableStream voor de audio data
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Bereid de parameters voor
+          const params = {
+            model: config.models.openai.tts || 'gpt-4o-mini-tts',
+            voice: config.models.openai.ttsVoice || 'alloy',
+            input: text,
+            response_format: 'mp3',
+          };
+          
+          // Voeg instructies toe als die zijn opgegeven
+          if (instructions) {
+            params.instructions = instructions;
+          }
+          
+          // Maak een streaming aanvraag naar de OpenAI API
+          const response = await fetch('https://api.openai.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${config.openaiApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(params),
+          });
+          
+          if (!response.ok) {
+            throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
+          }
+          
+          // Lees de response als een ReadableStream
+          const reader = response.body.getReader();
+          
+          // Verwerk de chunks van de stream
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+          
+          controller.close();
+        } catch (error) {
+          console.error('Fout bij het streamen van audio:', error);
+          controller.error(error);
+        }
+      }
     });
     
-    // Converteer de response naar een ArrayBuffer
-    const arrayBuffer = await mp3.arrayBuffer();
+    // Converteer de stream naar een blob
+    const response = new Response(stream);
+    const blob = await response.blob();
     
-    // Maak een Blob van de ArrayBuffer
-    const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
-    
-    // Maak een URL van de Blob
+    // Maak een URL van de blob
     const url = URL.createObjectURL(blob);
+    
+    // Stel de audio source in
+    audioElement.src = url;
+    
+    // Speel de audio automatisch af als dat gewenst is
+    // audioElement.play();
     
     return url;
   } catch (error) {
@@ -192,16 +243,22 @@ export const processSpeechToSpeech = async (audioBlob, context = {}) => {
     
     // Maak alvast een korte bevestiging klaar terwijl we wachten op het volledige antwoord
     const quickAcknowledgement = "Ik denk na over je vraag...";
-    const quickAudioPromise = textToSpeech(quickAcknowledgement);
+    
+    // Optionele instructies voor de stem
+    const voiceInstructions = context.voiceInstructions || "Spreek op een natuurlijke, vriendelijke toon. Gebruik een rustig tempo en duidelijke articulatie.";
+    
+    // Gebruik de nieuwe textToSpeech functie met instructies
+    const quickAudioPromise = textToSpeech(quickAcknowledgement, voiceInstructions);
     
     // Wacht op het LLM antwoord
     const response = await llmPromise;
     console.log('LLM antwoord:', response);
     
     // Stap 3: Converteer het antwoord naar spraak
-    const audioUrl = await textToSpeech(response);
-    console.log('Audio URL gegenereerd');
+    // Gebruik de nieuwe textToSpeech functie met instructies
+    const audioUrl = await textToSpeech(response, voiceInstructions);
     
+    // Stap 4: Geef het resultaat terug
     return {
       transcription,
       response,
@@ -209,7 +266,11 @@ export const processSpeechToSpeech = async (audioBlob, context = {}) => {
       quickAudioUrl: await quickAudioPromise
     };
   } catch (error) {
-    console.error('Fout in speech-to-speech verwerking:', error);
-    throw error;
+    console.error('Fout in spraak-naar-spraak verwerking:', error);
+    return {
+      transcription: "Er is een fout opgetreden.",
+      response: "Er is een fout opgetreden bij het verwerken van je vraag. Probeer het opnieuw.",
+      audioUrl: await textToSpeech("Er is een fout opgetreden bij het verwerken van je vraag. Probeer het opnieuw.")
+    };
   }
 };

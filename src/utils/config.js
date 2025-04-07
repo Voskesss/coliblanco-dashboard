@@ -4,6 +4,7 @@
 export const config = {
   // OpenAI API key wordt alleen op de server gebruikt, niet in de client
   // In de client gebruiken we de server endpoints
+  openaiApiKey: import.meta.env.VITE_OPENAI_API_KEY || '',
   
   // Providers
   sttProvider: import.meta.env.VITE_STT_PROVIDER || 'openai',
@@ -18,7 +19,7 @@ export const config = {
     openai: {
       stt: import.meta.env.VITE_OPENAI_STT_MODEL || 'whisper-1',
       llm: import.meta.env.VITE_OPENAI_LLM_MODEL || 'gpt-4o',
-      tts: import.meta.env.VITE_OPENAI_TTS_MODEL || 'tts-1',
+      tts: import.meta.env.VITE_OPENAI_TTS_MODEL || 'gpt-4o-mini-tts', 
       ttsVoice: import.meta.env.VITE_OPENAI_TTS_VOICE || 'alloy',
     },
     // Andere providers kunnen hier worden toegevoegd

@@ -2,14 +2,15 @@
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
-require('dotenv').config({ path: '../.env' });
+const path = require('path');
+const dotenv = require('dotenv');
+
+// Laad environment variables uit .env bestand in de root directory
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Laad environment variables uit .env bestand
-require('dotenv').config();
 
 // Gebruik de environment variable direct
 const OPENAI_API_KEY = process.env.VITE_OPENAI_API_KEY;
@@ -22,6 +23,7 @@ if (!OPENAI_API_KEY) {
 app.get('/session', async (req, res) => {
   try {
     console.log('Ephemeral token aanvraag ontvangen');
+    console.log('API Key beschikbaar:', !!OPENAI_API_KEY);
     
     // Maak een directe REST API aanvraag naar het OpenAI endpoint voor ephemeral tokens
     console.log('Directe REST API aanvraag naar OpenAI voor ephemeral token');
@@ -74,4 +76,5 @@ app.get('/session', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Realtime token server draait op poort ${PORT}`);
+  console.log('API Key beschikbaar:', !!OPENAI_API_KEY);
 });

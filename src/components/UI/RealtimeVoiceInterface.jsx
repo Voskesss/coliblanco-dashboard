@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from '@emotion/styled';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaMicrophone, FaStop, FaVolumeUp, FaPaperPlane, FaKeyboard, FaSpinner, FaVolumeMute, FaMicrophoneAlt } from 'react-icons/fa';
-import { setupChainedVoiceInterface } from '../../utils/chainedVoiceApi';
+import { FaMicrophone, FaStop, FaVolumeUp, FaPaperPlane, FaKeyboard, FaSpinner, FaVolumeMute } from 'react-icons/fa';
+import { textToSpeech, processWithLLM, transcribeAudio } from '../../utils/openai';
 
 const VoiceContainer = styled.div`
   position: absolute;
@@ -139,30 +139,6 @@ const ButtonsContainer = styled.div`
   align-items: center;
 `;
 
-const DemoButton = styled(motion.button)`
-  background-color: rgba(255, 255, 255, 0.7);
-  border: none;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-  color: #333;
-  font-size: 0.9rem;
-  transition: background-color 0.3s ease;
-  padding: 0.5rem 1rem;
-  border-radius: 25px;
-  margin-left: 0.5rem;
-  
-  &:hover {
-    background-color: rgba(255, 255, 255, 0.9);
-  }
-  
-  &:focus {
-    outline: none;
-  }
-`;
-
 const AudioControls = styled(motion.div)`
   position: absolute;
   bottom: -40px;
@@ -195,166 +171,206 @@ const VolumeSlider = styled.input`
   margin: 0 0.5rem;
 `;
 
-const StyledAiResponseContainer = styled.div`
-  font-size: 1.2rem;
-  line-height: 1.5;
-  text-align: center;
-  margin: 0 auto;
+const TranscriptContainer = styled(motion.div)`
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
   max-width: 80%;
-  min-height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  align-self: flex-start;
+  font-size: 0.9rem;
+  line-height: 1.4;
 `;
 
-const RealtimeVoiceInterface = ({ onCommand }) => {
-  const [status, setStatus] = useState('disconnected'); // disconnected, connecting, connected, error
+const ResponseContainer = styled(motion.div)`
+  background-color: rgba(255, 152, 0, 0.1);
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  max-width: 80%;
+  align-self: flex-end;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  border-left: 3px solid #FF9800;
+`;
+
+const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [feedback, setFeedback] = useState('');
   const [transcript, setTranscript] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
   const [inputText, setInputText] = useState('');
   const [volume, setVolume] = useState(80);
   const [isMuted, setIsMuted] = useState(false);
-  const [debugInfo, setDebugInfo] = useState('');
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [isError, setIsError] = useState(false);
   const [aiResponse, setAiResponse] = useState('');
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [showResponse, setShowResponse] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   
-  const sessionRef = useRef(null);
   const inputRef = useRef(null);
-  const audioRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
   
-  // Initialiseer de sessie
-  const initializeSession = async () => {
+  // Functie om de microfoon te activeren en te beginnen met opnemen
+  const startRecording = async () => {
     try {
-      setIsInitializing(true);
-      setDebugInfo('Sessie initialiseren...');
+      // Vraag toestemming voor de microfoon
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      // Gebruik de chained voice interface in plaats van de realtime API
-      const session = setupChainedVoiceInterface({
-        onSpeechStart: () => {
-          console.log('Spraak gedetecteerd');
-          setIsListening(true);
-          // Laat de AI-tekst staan, reset deze niet
-        },
-        onSpeechEnd: () => {
-          console.log('Spraak gestopt');
-          setIsListening(false);
-        },
-        onTranscriptComplete: (fullTranscript) => {
-          console.log('Volledige transcriptie ontvangen:', fullTranscript);
-          setTranscript(fullTranscript);
-          // Alleen de gebruikerstekst tonen in de debug-informatie
-          setDebugInfo(prev => prev + '\nGebruiker: ' + fullTranscript);
-        },
-        onTextDelta: (delta) => {
-          // Alleen de AI-tekst in het midden tonen
-          setAiResponse(prev => prev + delta);
-        },
-        onResponseDone: (response) => {
-          console.log('Antwoord voltooid:', response);
-          setIsProcessing(false);
+      // Maak een nieuwe MediaRecorder
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      
+      // Luister naar dataAvailable events
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      // Luister naar stop events
+      mediaRecorder.onstop = async () => {
+        console.log('Opname gestopt, verwerken...');
+        setIsProcessing(true);
+        
+        try {
+          // Maak een blob van de opgenomen audio chunks
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          
+          // Transcribeer de audio naar tekst met Whisper
+          const transcription = await transcribeAudio(audioBlob);
+          console.log('Transcriptie ontvangen:', transcription);
+          
+          // Toon de transcriptie
+          setTranscript(transcription);
+          setShowTranscript(true);
+          
+          // Verwerk de transcriptie met het LLM
+          const response = await processWithLLM(transcription);
+          console.log('LLM antwoord ontvangen:', response);
+          
+          // Toon het antwoord
+          setAiResponse(response);
+          setShowResponse(true);
+          
+          // Zet het antwoord om naar spraak met de nieuwe streaming TTS
+          const voiceInstructions = "Spreek op een natuurlijke, vriendelijke toon. Gebruik een rustig tempo en duidelijke articulatie.";
+          const audioUrl = await textToSpeech(response, voiceInstructions);
+          
+          // Speel de audio af
+          const audio = new Audio(audioUrl);
+          audio.volume = volume / 100;
+          audio.muted = isMuted;
+          audio.play();
+          setIsSpeaking(true);
+          
+          // Luister naar het einde van de audio
+          audio.onended = () => {
+            setIsSpeaking(false);
+            setIsProcessing(false);
+          };
           
           // Verwerk het commando als er een is
-          if (onCommand && response.output && response.output[0]?.content) {
-            const text = response.output[0].content[0]?.text || '';
-            onCommand(text);
+          if (processCommand) {
+            processCommand(response);
           }
-        },
-        onError: (error) => {
-          console.error('Fout in voice interface:', error);
-          setDebugInfo(prev => prev + '\nFout: ' + error.message);
+        } catch (error) {
+          console.error('Fout bij verwerken van opname:', error);
+          setErrorMessage(`Fout bij verwerken van opname: ${error.message}`);
           setIsProcessing(false);
-          setIsListening(false);
         }
-      });
+      };
       
-      // Sla de sessie op in de ref
-      sessionRef.current = session;
-      
-      setIsInitializing(false);
-      setDebugInfo(prev => prev + '\nSessie succesvol geïnitialiseerd');
+      // Start de opname
+      mediaRecorder.start();
+      setIsListening(true);
+      setErrorMessage('');
+      console.log('Opname gestart');
     } catch (error) {
-      console.error('Fout bij initialiseren sessie:', error);
-      setDebugInfo(prev => prev + '\nFout bij initialiseren sessie: ' + error.message);
-      setIsInitializing(false);
-      setIsError(true);
+      console.error('Fout bij starten opname:', error);
+      setErrorMessage(`Fout bij starten opname: ${error.message}`);
     }
   };
   
-  // Initialiseer de sessie wanneer de component wordt gemount
-  useEffect(() => {
-    initializeSession();
-    
-    // Cleanup functie
-    return () => {
-      if (sessionRef.current) {
-        sessionRef.current.endSession();
-        sessionRef.current = null;
+  // Functie om te stoppen met opnemen
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      setIsListening(false);
+      console.log('Opname gestopt');
+      
+      // Stop alle tracks in de stream
+      if (mediaRecorderRef.current.stream) {
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
       }
-    };
-  }, [onCommand]);
-  
-  // Update het volume wanneer het verandert
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume / 100;
     }
-  }, [volume]);
-  
-  // Update muted status wanneer het verandert
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.muted = isMuted;
-    }
-  }, [isMuted]);
-  
-  // Focus op het tekstinvoerveld wanneer het wordt weergegeven
-  useEffect(() => {
-    if (showTextInput && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [showTextInput]);
+  };
   
   // Functie om de microfoon te togglen
   const handleToggleMicrophone = async () => {
-    try {
-      if (!sessionRef.current) {
-        setDebugInfo('Geen actieve sessie, initialiseren...');
-        await initializeSession();
-      }
+    if (isListening) {
+      stopRecording();
+    } else {
+      // Reset voor een nieuwe conversatie
+      setAiResponse('');
+      setTranscript('');
+      setShowTranscript(false);
+      setShowResponse(false);
+      setErrorMessage('');
       
-      if (isListening) {
-        // Stop met luisteren
-        setIsProcessing(true);
-        // Laat de AI-tekst staan, reset deze niet
-        await sessionRef.current.stopListening();
-        // De rest wordt afgehandeld door de callbacks
-      } else {
-        // Start met luisteren
-        setDebugInfo(prev => prev + '\nStart luisteren...');
-        await sessionRef.current.startListening();
-      }
-    } catch (error) {
-      console.error('Fout bij togglen microfoon:', error);
-      setDebugInfo(prev => prev + '\nFout bij togglen microfoon: ' + error.message);
-      setIsError(true);
+      // Start met opnemen
+      await startRecording();
     }
   };
   
   // Functie om tekst te versturen
   const handleSendText = async () => {
-    if (!inputText.trim() || !sessionRef.current || isProcessing) return;
+    if (!inputText.trim() || isProcessing) return;
     
     setIsProcessing(true);
-    // Laat de AI-tekst staan, reset deze niet
-    setDebugInfo(prev => prev + '\nGebruiker (tekst): ' + inputText);
+    setTranscript(inputText);
+    setShowTranscript(true);
+    setErrorMessage('');
     
-    // Verstuur het bericht naar de voice API
-    sessionRef.current.sendMessage(inputText);
+    try {
+      // Verwerk de tekst met het LLM
+      const response = await processWithLLM(inputText);
+      console.log('LLM antwoord ontvangen:', response);
+      
+      // Toon het antwoord
+      setAiResponse(response);
+      setShowResponse(true);
+      
+      // Zet het antwoord om naar spraak met de nieuwe streaming TTS
+      const voiceInstructions = "Spreek op een natuurlijke, vriendelijke toon. Gebruik een rustig tempo en duidelijke articulatie.";
+      const audioUrl = await textToSpeech(response, voiceInstructions);
+      
+      // Speel de audio af
+      const audio = new Audio(audioUrl);
+      audio.volume = volume / 100;
+      audio.muted = isMuted;
+      audio.play();
+      setIsSpeaking(true);
+      
+      // Luister naar het einde van de audio
+      audio.onended = () => {
+        setIsSpeaking(false);
+        setIsProcessing(false);
+      };
+      
+      // Verwerk het commando als er een is
+      if (processCommand) {
+        processCommand(response);
+      }
+    } catch (error) {
+      console.error('Fout bij verwerken van tekst:', error);
+      setErrorMessage(`Fout bij verwerken van tekst: ${error.message}`);
+      setIsProcessing(false);
+    }
     
     // Reset de input
     setInputText('');
@@ -367,185 +383,150 @@ const RealtimeVoiceInterface = ({ onCommand }) => {
     }
   };
   
-  // Toggle tussen tekst en spraak input
-  const toggleTextInput = () => {
-    setShowTextInput(!showTextInput);
-    if (!showTextInput) {
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
+  // Cleanup functie bij unmount
+  useEffect(() => {
+    return () => {
+      // Stop de opname als die nog bezig is
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+        
+        // Stop alle tracks in de stream
+        if (mediaRecorderRef.current.stream) {
+          mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
         }
-      }, 100);
+      }
+    };
+  }, []);
+  
+  // Focus op het tekstinvoerveld wanneer het wordt weergegeven
+  useEffect(() => {
+    if (showTextInput && inputRef.current) {
+      inputRef.current.focus();
     }
-  };
-  
-  // Toggle mute status
-  const toggleMute = () => {
-    setIsMuted(!isMuted);
-  };
-  
-  // Verander volume
-  const handleVolumeChange = (e) => {
-    setVolume(parseInt(e.target.value, 10));
-  };
-  
-  // Demo functie om een vooraf gedefinieerde taak te tonen
-  const showDemoTask = () => {
-    if (!sessionRef.current || isProcessing || isListening || isSpeaking) return;
-    
-    // Lijst met demo vragen
-    const demoVragen = [
-      "Wat staat er vandaag op de agenda?",
-      "Stuur een mail naar het team",
-      "Wat is de status van het project?",
-      "Maak een samenvatting van het laatste rapport",
-      "Plan een meeting voor volgende week"
-    ];
-    
-    // Kies een willekeurige vraag
-    const randomIndex = Math.floor(Math.random() * demoVragen.length);
-    const randomVraag = demoVragen[randomIndex];
-    
-    // Vul de vraag in het inputveld
-    setInputText(randomVraag);
-    
-    // Verstuur de vraag na een korte vertraging
-    setTimeout(() => {
-      handleSendText();
-    }, 500);
-  };
-  
-  // Helper functie om de juiste status tekst te tonen
-  const getStatusMessage = () => {
-    if (isProcessing) return 'Verwerken...';
-    if (isSpeaking) return 'Spreekt...';
-    if (isListening) return 'Luistert...';
-    return '';
-  };
-  
-  // Render spinner component
-  const renderSpinner = () => (
-    <span className="spinner">
-      <FaSpinner />
-    </span>
-  );
-  
-  // Render microfoonknop
-  const renderMicrophoneButton = () => {
-    // Bepaal de juiste icon en kleur
-    const Icon = isListening ? FaStop : FaMicrophone;
-    const color = isListening ? '#f44336' : '#4CAF50';
-    
-    return (
-      <MicButton 
-        onClick={handleToggleMicrophone}
-        disabled={isProcessing || isInitializing}
-        isListening={isListening}
-        whileTap={{ scale: 0.9 }}
-      >
-        {isProcessing ? renderSpinner() : <Icon />}
-        <StatusIndicator 
-          isListening={isListening} 
-          isProcessing={isProcessing} 
-          isSpeaking={isSpeaking} 
-        />
-        {getStatusMessage() && <StatusText>{getStatusMessage()}</StatusText>}
-      </MicButton>
-    );
-  };
+  }, [showTextInput]);
   
   return (
     <VoiceContainer>
       <AnimatePresence>
-        {(aiResponse || isProcessing) && (
-          <FeedbackText
-            initial={{ opacity: 0, y: 10, scale: 0.9 }}
+        {showTranscript && transcript && (
+          <TranscriptContainer
+            initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.3 }}
           >
-            {/* Alleen de AI response tonen in het midden */}
-            <StyledAiResponseContainer>
-              {aiResponse}
-            </StyledAiResponseContainer>
-            
-            {/* Debug informatie tonen als showDebug aan staat */}
-            {false && debugInfo && (
-              <div style={{ marginTop: '10px', fontSize: '0.8rem', color: '#666', borderTop: '1px solid #ddd', paddingTop: '5px' }}>
-                <strong>Debug:</strong><br />
-                {debugInfo.split('\n').map((line, index) => (
-                  <React.Fragment key={`debug-${index}`}>
-                    {line}
-                    {index < debugInfo.split('\n').length - 1 && <br />}
-                  </React.Fragment>
-                ))}
-              </div>
-            )}
-          </FeedbackText>
+            <strong>Jij:</strong> {transcript}
+          </TranscriptContainer>
         )}
       </AnimatePresence>
       
       <AnimatePresence>
-        {showTextInput && (
-          <TextInputContainer
-            initial={{ opacity: 0, y: 10, width: 0 }}
-            animate={{ opacity: 1, y: 0, width: 300 }}
-            exit={{ opacity: 0, y: 10, width: 0 }}
+        {showResponse && aiResponse && (
+          <ResponseContainer
+            initial={{ opacity: 0, y: 20, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.3 }}
           >
-            <Input 
-              ref={inputRef}
-              type="text" 
-              placeholder="Typ je bericht hier..."
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyPress={handleKeyPress}
-              disabled={isInitializing || isError || isProcessing}
-            />
-            <SendButton onClick={handleSendText} whileTap={{ scale: 0.9 }}>
-              <FaPaperPlane />
-            </SendButton>
-          </TextInputContainer>
+            <strong>Assistent:</strong> {aiResponse}
+          </ResponseContainer>
         )}
       </AnimatePresence>
       
+      <AnimatePresence>
+        {errorMessage && (
+          <FeedbackText
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.3 }}
+          >
+            <strong>Fout:</strong> {errorMessage}
+          </FeedbackText>
+        )}
+      </AnimatePresence>
+      
+      {showTextInput && (
+        <TextInputContainer
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          transition={{ duration: 0.3 }}
+        >
+          <Input
+            ref={inputRef}
+            type="text"
+            placeholder="Typ je bericht..."
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyPress={handleKeyPress}
+            disabled={isProcessing}
+          />
+          <SendButton
+            onClick={handleSendText}
+            disabled={isProcessing || !inputText.trim()}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <FaPaperPlane />
+          </SendButton>
+        </TextInputContainer>
+      )}
+      
       <ButtonsContainer>
-        <TextButton 
-          onClick={toggleTextInput}
+        <TextButton
+          onClick={() => setShowTextInput(!showTextInput)}
+          whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
+          title="Tekst invoer"
         >
           <FaKeyboard />
         </TextButton>
         
-        {renderMicrophoneButton()}
-        
-        <DemoButton 
-          onClick={showDemoTask}
-          disabled={status !== 'connected' || isProcessing || isListening || isSpeaking}
+        <MicButton
+          onClick={handleToggleMicrophone}
+          disabled={isProcessing && !isListening}
+          isListening={isListening}
+          whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
+          title={isListening ? "Stop met luisteren" : "Start met luisteren"}
         >
-          Demo Vraag
-        </DemoButton>
+          {isListening ? <FaStop /> : <FaMicrophone />}
+          <StatusIndicator
+            isListening={isListening}
+            isProcessing={isProcessing}
+            isSpeaking={isSpeaking}
+          />
+          {(isListening || isProcessing || isSpeaking) && (
+            <StatusText>
+              {isListening ? "Luisteren..." : isProcessing ? "Verwerken..." : "Spreken..."}
+            </StatusText>
+          )}
+        </MicButton>
       </ButtonsContainer>
       
-      {/* Audio controls */}
-      <AudioControls
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5 }}
-      >
-        <VolumeButton onClick={toggleMute} whileTap={{ scale: 0.9 }}>
-          {isMuted ? <FaVolumeMute /> : <FaVolumeUp />}
-        </VolumeButton>
-        <VolumeSlider 
-          type="range" 
-          min="0" 
-          max="100" 
-          value={volume} 
-          onChange={handleVolumeChange} 
-          disabled={isMuted}
-        />
-      </AudioControls>
+      <AnimatePresence>
+        {(isListening || isProcessing || isSpeaking) && (
+          <AudioControls
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.3 }}
+          >
+            <VolumeButton onClick={() => setIsMuted(!isMuted)} title={isMuted ? "Geluid aan" : "Geluid uit"}>
+              {isMuted ? <FaVolumeMute /> : <FaVolumeUp />}
+            </VolumeButton>
+            <VolumeSlider
+              type="range"
+              min="0"
+              max="100"
+              value={volume}
+              onChange={(e) => setVolume(parseInt(e.target.value))}
+              disabled={isMuted}
+            />
+          </AudioControls>
+        )}
+      </AnimatePresence>
     </VoiceContainer>
   );
 };
