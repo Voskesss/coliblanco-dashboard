@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from '@emotion/styled';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaStop, FaVolumeUp, FaPaperPlane, FaSpinner, FaVolumeMute, FaChevronUp, FaMicrophone } from 'react-icons/fa';
+import { FaStop, FaVolumeUp, FaPaperPlane, FaSpinner, FaVolumeMute, FaChevronUp, FaMicrophone, FaTimes } from 'react-icons/fa';
 import { BsSoundwave } from 'react-icons/bs';
 import { textToSpeech, processWithLLM, transcribeAudio } from '../../utils/openai';
 
@@ -199,6 +199,30 @@ const VolumeSlider = styled.input`
   margin: 0 0.5rem;
 `;
 
+const StopButton = styled(motion.button)`
+  position: absolute;
+  top: -15px;
+  right: -15px;
+  background-color: #FF3B30;
+  border: none;
+  color: white;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  z-index: 1001;
+  
+  &:hover {
+    background-color: #E02E24;
+    transform: scale(1.05);
+  }
+`;
+
 const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -223,6 +247,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   const analyserRef = useRef(null);
   const silenceTimeoutRef = useRef(null);
   const lastSoundTimestampRef = useRef(Date.now());
+  const interruptionDetectorRef = useRef(null);
   
   // Functie om de AudioContext te initialiseren voor stiltedetectie
   const initAudioContext = async (stream) => {
@@ -272,7 +297,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       console.log('Geluidsniveau:', average);
       
       // Als het geluidsniveau boven een drempelwaarde is, update de timestamp
-      if (average > 3) { // Verlaagde drempelwaarde voor geluid
+      if (average > 3) { // Lage drempelwaarde voor betere gevoeligheid
         lastSoundTimestampRef.current = Date.now();
         
         // Clear bestaande timeout als die er is
@@ -284,8 +309,8 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
         // Als het stil is, controleer hoe lang het al stil is
         const silenceDuration = Date.now() - lastSoundTimestampRef.current;
         
-        // Als het langer dan 800ms stil is, stop met luisteren
-        if (silenceDuration > 800 && isListening && !silenceTimeoutRef.current) {
+        // Als het langer dan 1,5 seconde stil is, stop met luisteren
+        if (silenceDuration > 1500 && isListening && !silenceTimeoutRef.current) {
           console.log('Stilte gedetecteerd, stoppen met luisteren over 0.3s...');
           silenceTimeoutRef.current = setTimeout(() => {
             console.log('Stilte bevestigd, stoppen met luisteren...');
@@ -356,7 +381,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
             
             // Als we in gespreksmodus zijn, begin automatisch weer met luisteren
             if (conversationMode) {
-              startNextListening();
+              startRecording();
             }
             return;
           }
@@ -377,27 +402,8 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
           setAiResponse(response);
           setShowResponse(true);
           
-          // Zet het antwoord om naar spraak met de nieuwe streaming TTS
-          const voiceInstructions = "Personality/affect: a high-energy cheerleader helping with administrative tasks \n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
-          const audioUrl = await textToSpeech(response, voiceInstructions);
-          
-          // Speel de audio af
-          const audio = new Audio(audioUrl);
-          audio.volume = volume / 100;
-          audio.muted = isMuted;
-          audio.play();
-          setIsSpeaking(true);
-          
-          // Luister naar het einde van de audio
-          audio.onended = () => {
-            setIsSpeaking(false);
-            setIsProcessing(false);
-            
-            // Als we in gespreksmodus zijn, begin automatisch weer met luisteren
-            if (conversationMode && !isSpeaking) {
-              startNextListening();
-            }
-          };
+          // Zet het antwoord om naar spraak en speel het af
+          await speakResponse(response);
           
           // Verwerk het commando als er een is
           if (processCommand) {
@@ -408,9 +414,9 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
           setErrorMessage(`Fout bij verwerken van opname: ${error.message}`);
           setIsProcessing(false);
           
-          // Als we in gespreksmodus zijn, begin automatisch weer met luisteren na een fout
+          // Als we in gespreksmodus zijn, begin automatisch weer met luisteren
           if (conversationMode) {
-            startNextListening();
+            startRecording();
           }
         }
       };
@@ -461,19 +467,14 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   };
   
   // Functie om de microfoon te togglen
-  const handleToggleMicrophone = async () => {
+  const handleToggleMicrophone = () => {
     if (isListening) {
       stopRecording();
     } else {
-      // Reset voor een nieuwe conversatie
-      setAiResponse('');
-      setTranscript('');
-      setShowTranscript(false);
-      setShowResponse(false);
-      setErrorMessage('');
-      
-      // Start met opnemen
-      await startRecording();
+      if (!conversationMode) {
+        setConversationMode(true);
+      }
+      startRecording();
     }
   };
   
@@ -485,14 +486,6 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
     if (newMode) {
       // Als we gespreksmodus aanzetten en niet al aan het luisteren zijn, begin met luisteren
       if (!isListening && !isSpeaking && !isProcessing) {
-        // Reset voor een nieuwe conversatie
-        setAiResponse('');
-        setTranscript('');
-        setShowTranscript(false);
-        setShowResponse(false);
-        setErrorMessage('');
-        
-        // Start met opnemen
         startRecording();
       }
     } else {
@@ -526,27 +519,8 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       setAiResponse(response);
       setShowResponse(true);
       
-      // Zet het antwoord om naar spraak met de nieuwe streaming TTS
-      const voiceInstructions = "Personality/affect: a high-energy cheerleader helping with administrative tasks \n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
-      const audioUrl = await textToSpeech(response, voiceInstructions);
-      
-      // Speel de audio af
-      const audio = new Audio(audioUrl);
-      audio.volume = volume / 100;
-      audio.muted = isMuted;
-      audio.play();
-      setIsSpeaking(true);
-      
-      // Luister naar het einde van de audio
-      audio.onended = () => {
-        setIsSpeaking(false);
-        setIsProcessing(false);
-        
-        // Als we in gespreksmodus zijn, begin automatisch weer met luisteren
-        if (conversationMode) {
-          startNextListening();
-        }
-      };
+      // Zet het antwoord om naar spraak en speel het af
+      await speakResponse(response);
       
       // Verwerk het commando als er een is
       if (processCommand) {
@@ -556,6 +530,11 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       console.error('Fout bij verwerken van tekst:', error);
       setErrorMessage(`Fout bij verwerken van tekst: ${error.message}`);
       setIsProcessing(false);
+      
+      // Als we in gespreksmodus zijn, begin automatisch weer met luisteren
+      if (conversationMode) {
+        startNextListening();
+      }
     }
     
     // Reset de input
@@ -573,6 +552,64 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   const toggleExpanded = () => {
     setExpanded(!expanded);
   };
+  
+  // Functie om het spreken van de assistent te onderbreken
+  const interruptSpeaking = () => {
+    if (isSpeaking) {
+      // Stop alle audio die momenteel speelt
+      const audioElements = document.getElementsByTagName('audio');
+      for (let i = 0; i < audioElements.length; i++) {
+        audioElements[i].pause();
+        audioElements[i].currentTime = 0;
+      }
+      
+      setIsSpeaking(false);
+      console.log('Spreken onderbroken door gebruiker');
+      
+      // Begin direct met luisteren
+      if (conversationMode) {
+        startRecording();
+      }
+    }
+  };
+  
+  // Functie om te controleren of de gebruiker begint te spreken tijdens het afspelen
+  const checkForInterruption = () => {
+    if (!analyserRef.current || !isSpeaking) return;
+    
+    const bufferLength = analyserRef.current.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    analyserRef.current.getByteFrequencyData(dataArray);
+    
+    // Bereken het gemiddelde geluidsniveau
+    let sum = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      sum += dataArray[i];
+    }
+    const average = sum / bufferLength;
+    
+    // Als het geluidsniveau boven een drempelwaarde is, onderbreek het spreken
+    if (average > 10) { // Hogere drempelwaarde om valse triggers te voorkomen
+      console.log('Interruptie gedetecteerd, geluidsniveau:', average);
+      interruptSpeaking();
+    }
+    
+    // Blijf controleren als we nog steeds aan het spreken zijn
+    if (isSpeaking) {
+      interruptionDetectorRef.current = requestAnimationFrame(checkForInterruption);
+    }
+  };
+  
+  // Start interruptiedetectie wanneer de assistent begint te spreken
+  useEffect(() => {
+    if (isSpeaking && analyserRef.current) {
+      interruptionDetectorRef.current = requestAnimationFrame(checkForInterruption);
+    } else if (!isSpeaking && interruptionDetectorRef.current) {
+      cancelAnimationFrame(interruptionDetectorRef.current);
+      interruptionDetectorRef.current = null;
+    }
+  }, [isSpeaking]);
   
   // Cleanup functie bij unmount
   useEffect(() => {
@@ -608,6 +645,109 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       inputRef.current.focus();
     }
   }, []);
+  
+  // Zet conversatiemodus standaard aan bij het laden van de component
+  useEffect(() => {
+    setConversationMode(true);
+  }, []);
+  
+  // Functie om het gesprek te stoppen
+  const stopConversation = () => {
+    console.log('Gesprek stoppen...');
+    setConversationMode(false);
+    
+    // Stop de opname als die bezig is
+    if (isListening) {
+      stopRecording();
+    }
+    
+    // Stop alle audio die momenteel speelt
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    
+    const audioElements = document.getElementsByTagName('audio');
+    for (let i = 0; i < audioElements.length; i++) {
+      audioElements[i].pause();
+      audioElements[i].currentTime = 0;
+    }
+    
+    // Reset alle states
+    setIsSpeaking(false);
+    setIsProcessing(false);
+    setShowTranscript(false);
+    setShowResponse(false);
+    setTranscript('');
+    setAiResponse('');
+    setErrorMessage('');
+    
+    // Clear alle timeouts en intervals
+    if (silenceTimeoutRef.current) {
+      clearTimeout(silenceTimeoutRef.current);
+      silenceTimeoutRef.current = null;
+    }
+    
+    if (interruptionDetectorRef.current) {
+      cancelAnimationFrame(interruptionDetectorRef.current);
+      interruptionDetectorRef.current = null;
+    }
+    
+    if (silenceDetectorRef.current) {
+      cancelAnimationFrame(silenceDetectorRef.current);
+      silenceDetectorRef.current = null;
+    }
+    
+    console.log('Gesprek gestopt door gebruiker');
+  };
+  
+  // Functie om het antwoord om te zetten naar spraak en af te spelen
+  const speakResponse = async (response) => {
+    try {
+      // Zet het antwoord om naar spraak met de nieuwe streaming TTS
+      const voiceInstructions = "Personality/affect: a high-energy cheerleader helping with administrative tasks \n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
+      const audioUrl = await textToSpeech(response, voiceInstructions);
+      
+      // Speel de audio af
+      const audio = new Audio(audioUrl);
+      audio.volume = volume / 100;
+      audio.muted = isMuted;
+      
+      // Stop eventuele andere audio die nog speelt
+      const allAudios = document.getElementsByTagName('audio');
+      for (let i = 0; i < allAudios.length; i++) {
+        if (allAudios[i] !== audio) {
+          allAudios[i].pause();
+          allAudios[i].currentTime = 0;
+        }
+      }
+      
+      // Stop browser TTS als die nog actief is
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      
+      // Speel de nieuwe audio af
+      audio.play();
+      setIsSpeaking(true);
+      
+      // Luister naar het einde van de audio
+      audio.onended = () => {
+        setIsSpeaking(false);
+        
+        // Als we in gespreksmodus zijn, begin automatisch weer met luisteren
+        if (conversationMode && !isProcessing) {
+          startRecording();
+        }
+      };
+      
+      return audio;
+    } catch (error) {
+      console.error('Fout bij afspelen van spraak:', error);
+      setIsSpeaking(false);
+      setErrorMessage(`Fout bij afspelen van spraak: ${error.message}`);
+      return null;
+    }
+  };
   
   return (
     <VoiceContainer>
@@ -691,6 +831,14 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
               disabled={isMuted}
             />
           </AudioControls>
+        )}
+      </AnimatePresence>
+      
+      <AnimatePresence>
+        {conversationMode && (
+          <StopButton onClick={stopConversation} title="Gesprek stoppen">
+            <FaTimes size={30} />
+          </StopButton>
         )}
       </AnimatePresence>
       

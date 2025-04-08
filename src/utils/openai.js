@@ -111,7 +111,7 @@ export const textToSpeech = async (text, instructions = null) => {
     
     // Controleer of we een geldige API key hebben
     if (!config.openaiApiKey) {
-      console.warn('Geen OpenAI API key gevonden, gebruik browser TTS');
+      console.warn('Geen OpenAI API key gevonden, gebruik stille fallback');
       return useBrowserTTS(text);
     }
     
@@ -167,35 +167,23 @@ export const textToSpeech = async (text, instructions = null) => {
     return audioUrl;
   } catch (error) {
     console.error('Fout bij tekst naar spraak conversie:', error);
-    // Gebruik browser TTS als fallback
+    // Gebruik stille fallback als OpenAI TTS mislukt
     return useBrowserTTS(text);
   }
 };
 
-// Helper functie voor browser spraaksynthese als fallback
+// Helper functie voor browser spraaksynthese als fallback (nu uitgeschakeld)
 const useBrowserTTS = (text) => {
+  console.warn('Browser TTS is uitgeschakeld, geen audio afgespeeld');
   return new Promise((resolve) => {
-    // Gebruik de browser's speech synthesis API
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'nl-NL';
-    
-    // Voeg event handlers toe
-    utterance.onend = () => {
-      // Maak een dummy blob URL zonder echte audio data
-      resolve('dummy-audio-url');
-    };
-    
-    utterance.onerror = () => {
-      console.error('Fout bij het afspelen van spraaksynthese');
-      resolve('dummy-audio-url');
-    };
-    
-    // Start de spraaksynthese
-    speechSynthesis.speak(utterance);
+    // Retourneer een dummy URL zonder echte audio
+    setTimeout(() => {
+      resolve('dummy-audio-url-silent');
+    }, 100);
   });
 };
 
-// Volledige chained functie voor spraak naar spraak verwerking
+// Volledige chained functie voor spraak-naar-spraak verwerking
 export const processSpeechToSpeech = async (audioBlob, context = {}) => {
   try {
     // Toon een vroege feedback voordat we beginnen met verwerken
