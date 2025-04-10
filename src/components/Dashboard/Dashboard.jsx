@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import styled from '@emotion/styled';
 import { format } from 'date-fns';
 import { nl } from 'date-fns/locale';
@@ -9,6 +9,7 @@ import RealtimeVoiceInterface from '../UI/RealtimeVoiceInterface';
 import { useAppContext } from '../../context/AppContext';
 import { motion } from 'framer-motion';
 import { gsap } from 'gsap';
+import { useDashboard } from './DashboardController';
 
 const DashboardContainer = styled.div`
   width: 100vw;
@@ -79,7 +80,9 @@ const MessageContainer = styled.div`
 `;
 
 const Dashboard = () => {
-  const [currentTime, setCurrentTime] = useState(new Date());
+  // Gebruik de gedeelde dashboard controller voor tijd en datum
+  const { currentTime } = useDashboard();
+  
   const { 
     orbStatus, 
     showCards, 
@@ -89,15 +92,6 @@ const Dashboard = () => {
   
   const logoRef = useRef(null);
   const orbRef = useRef(null);
-  
-  useEffect(() => {
-    // Update time every second
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    
-    return () => clearInterval(timer);
-  }, []);
   
   // Animeer de kolibrie wanneer de status verandert
   useEffect(() => {

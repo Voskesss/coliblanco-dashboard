@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import './App.css'
-import Dashboard from './components/Dashboard/Dashboard'
+import GlassDashboardPage from './pages/GlassDashboardPage'
 
 function App() {
   return (
     <div className="app-container">
-      <Dashboard />
+      <GlassDashboardPage />
     </div>
   )
 }
