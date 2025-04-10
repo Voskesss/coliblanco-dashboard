@@ -3,8 +3,8 @@ import styled from '@emotion/styled';
 import { motion } from 'framer-motion';
 import { useAppContext } from '../../context/AppContext';
 import { useDashboard } from './DashboardController';
+// import ContextCards from './ContextCards'; // Verwijderd omdat we deze niet meer gebruiken
 import RealtimeVoiceInterface from '../UI/RealtimeVoiceInterface';
-import ContextCards from './ContextCards';
 import PulsingOrb from '../UI/PulsingOrb';
 import logo from '../../components/UI/logo-coliblanco.png';
 import { textToSpeech } from '../../utils/openai';
@@ -815,7 +815,7 @@ const MinimalistDashboard = () => {
             <p>{lastCommand || "Goedemorgen, ik hoop dat je lekker hebt geslapen!"}</p>
           </DesktopMessageContainer>
           
-          {showCards && <ContextCards />}
+          {/* Verwijderd: {showCards && <ContextCards />} */}
           
           <VoiceContainer>
             <RealtimeVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
@@ -925,9 +925,9 @@ const MinimalistDashboard = () => {
         </TextInputContainer>
         
         {/* Context cards voor mobiel */}
-        {showCards && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 100 }}>
+        {/* Verwijderd: {showCards && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 100 }}>
           <ContextCards />
-        </div>}
+        </div>} */}
       </MobileLayout>
     </DashboardContainer>
   );
