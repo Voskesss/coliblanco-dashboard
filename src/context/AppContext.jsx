@@ -1,4 +1,5 @@
 import React, { createContext, useState, useContext } from 'react';
+import { processWithLLM } from '../utils/openai';
 
 // Creëer de context
 const AppContext = createContext();
@@ -47,39 +48,32 @@ export const AppProvider = ({ children }) => {
   ];
   
   // Functie om een spraakcommando te verwerken
-  const processCommand = (command) => {
+  const processCommand = async (command) => {
     setLastCommand(command);
     setOrbStatus('processing');
     
-    // Zoek een passend antwoord in onze vooraf gedefinieerde taken
-    let foundTask = null;
-    
-    // Controleer of het commando overeenkomt met een van onze taken
-    for (const task of mockTasks) {
-      if (command.toLowerCase().includes(task.command.toLowerCase()) || 
-          task.command.toLowerCase().includes(command.toLowerCase())) {
-        foundTask = task;
-        break;
-      }
-    }
-    
-    // Als er geen specifieke taak is gevonden, gebruik een algemeen antwoord
-    if (!foundTask) {
-      foundTask = {
-        response: "Ik begrijp je vraag. Kan je iets specifieker zijn over wat je wilt weten of doen?",
-        audioUrl: "/audio/algemeen.mp3"
-      };
-    }
-    
-    // Simuleer verwerking en toon het antwoord
-    setTimeout(() => {
+    try {
+      // Gebruik de echte OpenAI LLM functie om het commando te verwerken
+      const response = await processWithLLM(command);
+      console.log('Echte LLM antwoord ontvangen:', response);
+      
+      // Update de UI met het echte antwoord
       setOrbStatus('active');
       setShowCards(true);
-      setLastCommand(foundTask.response); // Toon het antwoord in de UI
-    }, 1500);
-    
-    // Geef het gevonden antwoord terug voor gebruik in de spraakinterface
-    return foundTask;
+      
+      // Retourneer het antwoord in het juiste formaat voor de spraakinterface
+      return { response };
+    } catch (error) {
+      console.error('Fout bij verwerken van commando met LLM:', error);
+      
+      // Fallback naar een algemeen antwoord bij fouten
+      const fallbackResponse = {
+        response: "Er is een fout opgetreden bij het verwerken van je vraag. Probeer het later nog eens."
+      };
+      
+      setOrbStatus('idle');
+      return fallbackResponse;
+    }
   };
   
   // Functie om een notificatie als gelezen te markeren
@@ -96,6 +90,7 @@ export const AppProvider = ({ children }) => {
     showCards,
     setShowCards,
     lastCommand,
+    setLastCommand,
     processCommand,
     notifications,
     markNotificationAsRead,

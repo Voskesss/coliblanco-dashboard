@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import styled from '@emotion/styled';
 import { motion } from 'framer-motion';
+import { useAppContext } from '../../context/AppContext';
 import { useDashboard } from './DashboardController';
 import RealtimeVoiceInterface from '../UI/RealtimeVoiceInterface';
 import ContextCards from './ContextCards';
@@ -569,7 +570,7 @@ const TextInputContainer = styled.div`
   width: 80%;
   max-width: 800px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   z-index: 10;
   
   @media (max-width: 480px) {
@@ -582,18 +583,24 @@ const TextInputContainer = styled.div`
   }
 `;
 
-const TextInput = styled.input`
+const TextInput = styled.textarea`
   width: 100%;
-  height: 60px;
+  min-height: ${props => props.isFocused ? '90px' : '40px'};
+  max-height: 120px;
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(10px);
   border-radius: 30px;
   border: 1px solid rgba(255, 255, 255, 0.3);
   box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
-  padding: 0 30px;
+  padding: ${props => props.isFocused ? '15px 60px 15px 30px' : '8px 60px 8px 30px'};
   color: #fff;
   font-size: 18px;
   outline: none;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.5;
+  font-family: inherit;
+  transition: all 0.3s ease;
   
   &::placeholder {
     color: rgba(255, 255, 255, 0.7);
@@ -605,18 +612,19 @@ const TextInput = styled.input`
   }
   
   @media (max-width: 480px) {
-    height: 50px;
+    min-height: ${props => props.isFocused ? '80px' : '40px'};
     font-size: 16px;
-    padding: 0 20px;
+    padding: ${props => props.isFocused ? '12px 60px 12px 20px' : '8px 60px 8px 20px'};
   }
 `;
 
 const SendButton = styled.button`
   position: absolute;
   right: 10px;
-  width: 40px;
-  height: 40px;
-  background: rgba(255, 255, 255, 0.3);
+  bottom: 10px;
+  width: 44px;
+  height: 44px;
+  background: rgba(27, 64, 111, 0.8);
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.4);
   display: flex;
@@ -626,43 +634,95 @@ const SendButton = styled.button`
   transition: all 0.3s ease;
   
   &:hover {
-    background: rgba(255, 255, 255, 0.5);
+    background: rgba(27, 64, 111, 1);
     transform: scale(1.05);
   }
   
   svg {
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     fill: #fff;
+  }
+  
+  @media (max-width: 480px) {
+    width: 40px;
+    height: 40px;
+    
+    svg {
+      width: 20px;
+      height: 20px;
+    }
   }
 `;
 
 // Hoofdcomponent
 const MinimalistDashboard = () => {
-  const { 
+  // Gebruik de gedeelde dashboard controller
+  const {
     currentTime,
-    lastCommand,
-    processCommand,
-    showCards,
-    orbStatus
+    weather,
+    emails,
+    events,
+    music,
+    formatTime,
+    formatDate,
+    getGreeting,
+    generateCalendarDays,
+    togglePlayMusic,
+    dayNames
   } = useDashboard();
+  
+  // Haal de app context op voor de voice interface
+  const { 
+    orbStatus, 
+    showCards, 
+    lastCommand, 
+    processCommand,
+    setOrbStatus,
+    setLastCommand
+  } = useAppContext();
   
   const logoRef = useRef(null);
   const cloudRef = useRef(null);
   const orbRef = useRef(null);
   const [inputText, setInputText] = useState('');
+  const [isFocused, setIsFocused] = useState(false);
   
   // Functie om tekst te versturen
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (inputText.trim()) {
-      processCommand(inputText);
-      setInputText('');
+      console.log('Bericht verzenden:', inputText);
+      
+      // Update de UI om te tonen dat we het bericht verwerken
+      setOrbStatus('processing');
+      
+      try {
+        // Gebruik de echte OpenAI LLM functie om het bericht te verwerken
+        const response = await processCommand(inputText);
+        console.log('LLM antwoord ontvangen:', response.response);
+        
+        // Update de UI met het antwoord
+        setLastCommand(response.response);
+        setOrbStatus('active');
+        
+        // Wacht even voordat we teruggaan naar idle status
+        setTimeout(() => {
+          setOrbStatus('idle');
+        }, 2000);
+        
+        // Reset het invoerveld
+        setInputText('');
+      } catch (error) {
+        console.error('Fout bij verwerken van bericht:', error);
+        setOrbStatus('idle');
+      }
     }
   };
-  
+
   // Functie voor het afhandelen van de Enter toets
   const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); // Voorkom nieuwe regel bij Enter zonder Shift
       handleSendMessage();
     }
   };
@@ -717,7 +777,7 @@ const MinimalistDashboard = () => {
           </DesktopIconButton>
           <DesktopIconButton>
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 3C7.59 3 4 6.59 4 11C4 15.41 7.59 19 12 19C16.41 19 20 15.41 20 11C20 6.59 16.41 3 12 3ZM12 17C8.69 17 6 14.31 6 11C6 7.69 8.69 5 12 5C15.31 5 18 7.69 18 11C18 14.31 15.31 17 12 17Z" fill="currentColor"/>
+              <path d="M12 3C7.59 3 4 6.59 4 11C4 15.41 7.59 19 12 19C16.41 19 20 15.41 20 11C20 6.59 16.41 3 12 3ZM12 17C8.69 17 4 14.31 4 11C4 7.69 8.69 5 12 5C15.31 5 18 7.69 18 11C18 14.31 15.31 17 12 17Z" fill="currentColor"/>
               <path d="M11 7H13V17H11V7Z" fill="currentColor"/>
               <path d="M11 15H13V17H11V15Z" fill="currentColor"/>
             </svg>
@@ -750,11 +810,14 @@ const MinimalistDashboard = () => {
           
           <TextInputContainer>
             <TextInput 
-              type="text" 
+              type="textarea" 
               placeholder="Typ een bericht..." 
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyPress={handleKeyPress}
+              isFocused={isFocused}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
             />
             <SendButton onClick={handleSendMessage}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -832,11 +895,14 @@ const MinimalistDashboard = () => {
         {/* Tekstveld voor mobiel */}
         <TextInputContainer>
           <TextInput 
-            type="text" 
+            type="textarea" 
             placeholder="Typ een bericht..." 
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyPress={handleKeyPress}
+            isFocused={isFocused}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
           />
           <SendButton onClick={handleSendMessage}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">

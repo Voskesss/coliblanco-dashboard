@@ -94,6 +94,47 @@ const DashboardController = ({ children }) => {
   };
   
   // Alle data en functies die we willen delen met dashboards
+  const [lastCommand, setLastCommand] = useState("Goedemorgen, ik hoop dat je lekker hebt geslapen!");
+  const [orbStatus, setOrbStatus] = useState('idle'); // idle, listening, processing, active
+  const [showCards, setShowCards] = useState(false);
+  
+  // Functie om commando's te verwerken (zowel spraak als tekst)
+  const processCommand = (command) => {
+    console.log('Commando ontvangen:', command);
+    // Update direct de lastCommand state
+    setLastCommand(command);
+    
+    // Update de orb status
+    setOrbStatus('processing');
+    
+    // Simuleer verwerking (in een echte implementatie zou je hier de OpenAI API aanroepen)
+    setTimeout(() => {
+      // Genereer een antwoord
+      const responses = [
+        "Ik heb je bericht ontvangen. Wat kan ik nog meer voor je doen?",
+        "Bedankt voor je bericht. Ik ga ermee aan de slag.",
+        "Ik begrijp je vraag. Laat me dat voor je uitzoeken.",
+        "Dat is een interessante vraag. Hier is wat ik weet...",
+        "Ik heb je opdracht verwerkt. Is er nog iets anders?"
+      ];
+      
+      // Kies een willekeurig antwoord
+      const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+      
+      // Update de status en het antwoord
+      setOrbStatus('active');
+      setLastCommand(randomResponse);
+      
+      // Reset de status na een tijdje
+      setTimeout(() => {
+        setOrbStatus('idle');
+      }, 2000);
+    }, 1000);
+    
+    return true;
+  };
+  
+  // Alle data en functies die we willen delen met dashboards
   const value = {
     currentTime,
     weather,
@@ -105,7 +146,11 @@ const DashboardController = ({ children }) => {
     getGreeting,
     generateCalendarDays,
     togglePlayMusic,
-    dayNames: ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+    dayNames: ['M', 'T', 'W', 'T', 'F', 'S', 'S'],
+    lastCommand,
+    orbStatus,
+    showCards,
+    processCommand
   };
   
   return (
