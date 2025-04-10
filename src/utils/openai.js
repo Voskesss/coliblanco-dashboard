@@ -73,21 +73,30 @@ export const processWithLLM = async (text, context = {}) => {
     const userText = context.userText || text;
     
     // Bereid de berichten voor
-    const messages = [
+    let messages = [
       {
         role: "system",
         content: `Je bent een behulpzame assistent voor Coliblanco. 
                  Huidige tijd: ${new Date().toLocaleString('nl-NL')}.
                  Houd je antwoorden kort en bondig, maar wel vriendelijk en behulpzaam.
                  Spreek Nederlands.`
-      },
-      { role: "user", content: userText }
+      }
     ];
     
+    // Voeg conversatiegeschiedenis toe als die er is
+    if (context.conversationHistory && Array.isArray(context.conversationHistory)) {
+      messages = [...messages, ...context.conversationHistory];
+    }
+    
+    // Voeg het huidige bericht van de gebruiker toe
+    messages.push({ role: "user", content: userText });
+    
     // Voeg context toe als die er is
-    if (context && Object.keys(context).length > 0 && !context.userText) {
+    if (context && Object.keys(context).length > 0 && !context.userText && !context.conversationHistory) {
       messages[0].content += `\nContext: ${JSON.stringify(context)}`;
     }
+    
+    console.log('Berichten naar OpenAI:', messages);
     
     // Roep de OpenAI API aan
     const completion = await openai.chat.completions.create({
@@ -97,10 +106,22 @@ export const processWithLLM = async (text, context = {}) => {
     
     const response = completion.choices[0].message.content;
     console.log('GPT antwoord ontvangen:', response);
-    return response;
+    
+    // Maak een nieuw antwoord object dat ook de bijgewerkte conversatiegeschiedenis bevat
+    const result = {
+      response: response,
+      conversationHistory: [...(context.conversationHistory || []), 
+                           { role: "user", content: userText }, 
+                           { role: "assistant", content: response }]
+    };
+    
+    return result;
   } catch (error) {
     console.error('Fout bij het verwerken van tekst met LLM:', error);
-    return "Er is een fout opgetreden bij het verwerken van je vraag.";
+    return {
+      response: "Er is een fout opgetreden bij het verwerken van je vraag.",
+      conversationHistory: context.conversationHistory || []
+    };
   }
 };
 
@@ -203,12 +224,13 @@ export const processSpeechToSpeech = async (audioBlob, context = {}) => {
     
     // Stap 3: Converteer het antwoord naar spraak
     // Gebruik de nieuwe textToSpeech functie met instructies
-    const audioUrl = await textToSpeech(response, voiceInstructions);
+    const audioUrl = await textToSpeech(response.response, voiceInstructions);
     
     // Stap 4: Geef het resultaat terug
     return {
       transcription,
-      response,
+      response: response.response,
+      conversationHistory: response.conversationHistory,
       audioUrl,
       quickAudioUrl: await quickAudioPromise
     };
@@ -217,6 +239,7 @@ export const processSpeechToSpeech = async (audioBlob, context = {}) => {
     return {
       transcription: "Er is een fout opgetreden.",
       response: "Er is een fout opgetreden bij het verwerken van je vraag. Probeer het opnieuw.",
+      conversationHistory: context.conversationHistory || [],
       audioUrl: await textToSpeech("Er is een fout opgetreden bij het verwerken van je vraag. Probeer het opnieuw.")
     };
   }

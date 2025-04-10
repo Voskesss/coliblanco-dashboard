@@ -6,9 +6,9 @@ import { useDashboard } from './DashboardController';
 // import ContextCards from './ContextCards'; // Verwijderd omdat we deze niet meer gebruiken
 import RealtimeVoiceInterface from '../UI/RealtimeVoiceInterface';
 import PulsingOrb from '../UI/PulsingOrb';
-import ElevenLabsWidget from '../UI/ElevenLabsWidget';
 import logo from '../../components/UI/logo-coliblanco.png';
 import { textToSpeech } from '../../utils/openai';
+import { config } from '../../utils/config';
 
 // Hoofdcontainer voor de hele applicatie
 const DashboardContainer = styled.div`
@@ -694,6 +694,7 @@ const MinimalistDashboard = () => {
   const orbRef = useRef(null);
   const [inputText, setInputText] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState([]);
   
   // Functie om tekst te versturen
   const handleSendMessage = async () => {
@@ -705,17 +706,19 @@ const MinimalistDashboard = () => {
       
       try {
         // Gebruik de echte OpenAI LLM functie om het bericht te verwerken
-        const response = await processCommand(inputText);
+        const response = await processCommand(inputText, { conversationHistory });
         console.log('LLM antwoord ontvangen:', response.response);
         
         // Update de UI met het antwoord
         setLastCommand(response.response);
         setOrbStatus('active');
         
+        // Update de conversatiegeschiedenis
+        setConversationHistory(response.conversationHistory);
+        
         // Spreek het antwoord uit met de textToSpeech functie
         try {
-          const voiceInstructions = "Personality/affect: a high-energy cheerleader helping with administrative tasks \n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
-          const audioUrl = await textToSpeech(response.response, voiceInstructions);
+          const audioUrl = await textToSpeech(response.response, config.models.openai.ttsInstructions);
           
           // Speel de audio af
           const audio = new Audio(audioUrl);
@@ -825,7 +828,6 @@ const MinimalistDashboard = () => {
           
           <VoiceContainer>
             <RealtimeVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
-            <ElevenLabsWidget />
           </VoiceContainer>
           
           <TextInputContainer>
@@ -891,7 +893,6 @@ const MinimalistDashboard = () => {
         {/* Voice interface voor mobiel */}
         <MobileVoiceSection>
           <RealtimeVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
-          <ElevenLabsWidget />
         </MobileVoiceSection>
         
         {/* Navigatie voor mobiel */}

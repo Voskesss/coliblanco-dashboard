@@ -5,6 +5,7 @@ import { FaStop, FaVolumeUp, FaPaperPlane, FaSpinner, FaVolumeMute, FaChevronUp,
 import { BsSoundwave } from 'react-icons/bs';
 import { textToSpeech, processWithLLM, transcribeAudio } from '../../utils/openai';
 import { setupRealtimeSession } from '../../utils/realtimeApi';
+import { config } from '../../utils/config';
 
 const VoiceContainer = styled.div`
   position: absolute;
@@ -239,6 +240,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   const [volume, setVolume] = useState(80);
   const [conversationMode, setConversationMode] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState('alloy');
+  const [conversationHistory, setConversationHistory] = useState([]);
   
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -397,20 +399,26 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
               return;
             }
             
+            // Voeg de transcriptie toe aan de conversatiegeschiedenis
+            setConversationHistory([...conversationHistory, { type: 'user', text: transcription }]);
+            
             // Verwerk de tekst met het taalmodel
-            const response = await processWithLLM(transcription);
+            const response = await processWithLLM(transcription, { conversationHistory });
             console.log('LLM antwoord ontvangen:', response);
             
             // Toon het antwoord
-            setAiResponse(response);
+            setAiResponse(response.response);
             setShowResponse(true);
             
+            // Update de conversatiegeschiedenis met de nieuwe geschiedenis van het antwoord
+            setConversationHistory(response.conversationHistory);
+            
             // Spreek het antwoord uit
-            await speakResponse(response);
+            await speakResponse(response.response);
             
             // Verwerk het commando als dat nodig is
             if (processCommand) {
-              processCommand(response);
+              processCommand(response.response);
             }
           } catch (error) {
             console.error('Fout bij verwerken van audio:', error);
@@ -455,15 +463,21 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       setShowTranscript(true);
       setTranscript(inputText);
       
-      const response = await processWithLLM(inputText);
+      // Voeg de tekst toe aan de conversatiegeschiedenis
+      setConversationHistory([...conversationHistory, { type: 'user', text: inputText }]);
       
-      setAiResponse(response);
+      const response = await processWithLLM(inputText, { conversationHistory });
+      
+      setAiResponse(response.response);
       setShowResponse(true);
       
-      await speakResponse(response);
+      // Update de conversatiegeschiedenis met de nieuwe geschiedenis van het antwoord
+      setConversationHistory(response.conversationHistory);
+      
+      await speakResponse(response.response);
       
       if (processCommand) {
-        processCommand(response);
+        processCommand(response.response);
       }
       
       setInputText('');
@@ -615,8 +629,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   
   const speakResponse = async (response) => {
     try {
-      const voiceInstructions = "Personality/affect: a high-energy cheerleader helping with administrative tasks \n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
-      const audioUrl = await textToSpeech(response, voiceInstructions);
+      const audioUrl = await textToSpeech(response, config.models.openai.ttsInstructions);
       
       const audio = new Audio(audioUrl);
       audio.volume = volume / 100;
