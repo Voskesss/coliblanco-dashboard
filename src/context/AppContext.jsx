@@ -48,27 +48,29 @@ export const AppProvider = ({ children }) => {
   ];
   
   // Functie om een spraakcommando te verwerken
-  const processCommand = async (command) => {
+  const processCommand = async (command, context = {}) => {
     setLastCommand(command);
     setOrbStatus('processing');
     
     try {
       // Gebruik de echte OpenAI LLM functie om het commando te verwerken
-      const response = await processWithLLM(command);
+      const response = await processWithLLM(command, context);
       console.log('Echte LLM antwoord ontvangen:', response);
       
       // Update de UI met het echte antwoord
       setOrbStatus('active');
       setShowCards(true);
+      setLastCommand(response.response); // Zorg ervoor dat we de string opslaan, niet het object
       
       // Retourneer het antwoord in het juiste formaat voor de spraakinterface
-      return { response };
+      return response;
     } catch (error) {
       console.error('Fout bij verwerken van commando met LLM:', error);
       
       // Fallback naar een algemeen antwoord bij fouten
       const fallbackResponse = {
-        response: "Er is een fout opgetreden bij het verwerken van je vraag. Probeer het later nog eens."
+        response: "Er is een fout opgetreden bij het verwerken van je vraag. Probeer het later nog eens.",
+        conversationHistory: context.conversationHistory || []
       };
       
       setOrbStatus('idle');

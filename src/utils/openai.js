@@ -85,6 +85,7 @@ export const processWithLLM = async (text, context = {}) => {
     
     // Voeg conversatiegeschiedenis toe als die er is
     if (context.conversationHistory && Array.isArray(context.conversationHistory)) {
+      console.log('Conversatiegeschiedenis toevoegen:', context.conversationHistory);
       messages = [...messages, ...context.conversationHistory];
     }
     
@@ -130,17 +131,20 @@ export const textToSpeech = async (text, instructions = null) => {
   try {
     console.log('Tekst naar spraak omzetten met TTS...');
     
+    // Controleer of het een object is met een response veld
+    const inputText = typeof text === 'object' && text.response ? text.response : text;
+    
     // Controleer of we een geldige API key hebben
     if (!config.openaiApiKey) {
       console.warn('Geen OpenAI API key gevonden, gebruik stille fallback');
-      return useBrowserTTS(text);
+      return useBrowserTTS(inputText);
     }
     
     // Gebruik de gecentraliseerde configuratie
     const response = await openai.audio.speech.create({
       model: config.models.openai.tts,
       voice: config.models.openai.ttsVoice,
-      input: text,
+      input: inputText,
       instructions: instructions || config.models.openai.ttsInstructions
     });
     

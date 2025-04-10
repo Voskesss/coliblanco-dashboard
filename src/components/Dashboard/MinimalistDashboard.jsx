@@ -710,7 +710,7 @@ const MinimalistDashboard = () => {
         console.log('LLM antwoord ontvangen:', response.response);
         
         // Update de UI met het antwoord
-        setLastCommand(response.response);
+        setLastCommand(response.response); // Alleen de response string opslaan
         setOrbStatus('active');
         
         // Update de conversatiegeschiedenis
@@ -718,7 +718,7 @@ const MinimalistDashboard = () => {
         
         // Spreek het antwoord uit met de textToSpeech functie
         try {
-          const audioUrl = await textToSpeech(response.response, config.models.openai.ttsInstructions);
+          const audioUrl = await textToSpeech(response.response);
           
           // Speel de audio af
           const audio = new Audio(audioUrl);

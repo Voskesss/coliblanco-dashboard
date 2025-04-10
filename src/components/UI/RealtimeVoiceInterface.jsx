@@ -292,7 +292,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       
       console.log('Geluidsniveau:', average);
       
-      if (average > 3) { 
+      if (average > 10) { 
         lastSoundTimestampRef.current = Date.now();
         
         if (silenceTimeoutRef.current) {
@@ -302,13 +302,13 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       } else {
         const silenceDuration = Date.now() - lastSoundTimestampRef.current;
         
-        if (silenceDuration > 1500 && isListening && !silenceTimeoutRef.current) {
-          console.log('Stilte gedetecteerd, stoppen met luisteren over 0.3s...');
+        if (silenceDuration > 3000 && isListening && !silenceTimeoutRef.current) {
+          console.log('Stilte gedetecteerd, stoppen met luisteren over 1s...');
           silenceTimeoutRef.current = setTimeout(() => {
             console.log('Stilte bevestigd, stoppen met luisteren...');
             stopRecording();
             silenceTimeoutRef.current = null;
-          }, 300); 
+          }, 1000); 
         }
       }
       
@@ -399,9 +399,6 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
               return;
             }
             
-            // Voeg de transcriptie toe aan de conversatiegeschiedenis
-            setConversationHistory([...conversationHistory, { type: 'user', text: transcription }]);
-            
             // Verwerk de tekst met het taalmodel
             const response = await processWithLLM(transcription, { conversationHistory });
             console.log('LLM antwoord ontvangen:', response);
@@ -464,7 +461,8 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       setTranscript(inputText);
       
       // Voeg de tekst toe aan de conversatiegeschiedenis
-      setConversationHistory([...conversationHistory, { type: 'user', text: inputText }]);
+      // Niet meer nodig, wordt nu in processWithLLM gedaan
+      // setConversationHistory([...conversationHistory, { type: 'user', text: inputText }]);
       
       const response = await processWithLLM(inputText, { conversationHistory });
       
@@ -629,7 +627,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   
   const speakResponse = async (response) => {
     try {
-      const audioUrl = await textToSpeech(response, config.models.openai.ttsInstructions);
+      const audioUrl = await textToSpeech(response);
       
       const audio = new Audio(audioUrl);
       audio.volume = volume / 100;
