@@ -132,16 +132,30 @@ const MessageContainer = styled.div`
 
 const GlowingOrb = styled.div`
   position: absolute;
-  width: 350px;
-  height: 350px;
+  width: 400px;
+  height: 400px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  filter: blur(40px);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.1) 70%);
+  filter: blur(30px);
   top: 50%;
   left: 40%;
   transform: translate(-50%, -50%);
   z-index: 1;
-  box-shadow: 0 0 80px 20px rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 100px 40px rgba(255, 255, 255, 0.2);
+`;
+
+const OrbCloud = styled(motion.div)`
+  position: absolute;
+  width: 550px;
+  height: 550px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0) 40%, rgba(255, 255, 255, 0.05) 70%, rgba(255, 255, 255, 0.1) 100%);
+  top: 50%;
+  left: 40%;
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  pointer-events: none;
+  filter: blur(40px);
 `;
 
 const PulsingOrbContainer = styled.div`
@@ -177,6 +191,7 @@ const MinimalistDashboard = () => {
   
   const logoRef = useRef(null);
   const orbRef = useRef(null);
+  const cloudRef = useRef(null);
   
   // Animeer de kolibrie wanneer de status verandert
   useEffect(() => {
@@ -212,6 +227,53 @@ const MinimalistDashboard = () => {
             duration: 0.3,
             ease: "power2.inOut"
           });
+      }
+    }
+  }, [orbStatus]);
+  
+  // Animeer de wolk wanneer de status verandert
+  useEffect(() => {
+    const cloudElement = cloudRef.current;
+    
+    if (cloudElement) {
+      if (orbStatus === 'listening') {
+        // Subtiele pulserende beweging tijdens luisteren
+        gsap.to(cloudElement, {
+          scale: 1.03,
+          opacity: 0.7,
+          duration: 2,
+          repeat: -1,
+          yoyo: true,
+          ease: "sine.inOut"
+        });
+      } else if (orbStatus === 'processing') {
+        // Subtielere pulserende beweging tijdens verwerking
+        gsap.to(cloudElement, {
+          scale: 1.05,
+          opacity: 0.8,
+          duration: 1.5,
+          repeat: -1,
+          yoyo: true,
+          ease: "power1.inOut"
+        });
+      } else if (orbStatus === 'active') {
+        // Zachtere expansie bij activiteit
+        gsap.to(cloudElement, {
+          scale: 1.08,
+          opacity: 0.9,
+          duration: 2.5,
+          repeat: 1,
+          yoyo: true,
+          ease: "power2.inOut"
+        });
+      } else {
+        // Reset animatie
+        gsap.to(cloudElement, {
+          scale: 1,
+          opacity: 0.5,
+          duration: 1.5,
+          ease: "power2.out"
+        });
       }
     }
   }, [orbStatus]);
@@ -276,6 +338,12 @@ const MinimalistDashboard = () => {
       </Header>
       
       <MainContent>
+        <OrbCloud
+          ref={cloudRef}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        />
         <GlowingOrb />
         <PulsingOrbContainer>
           <PulsingOrb status={orbStatus} ref={orbRef} className="orb-ref" />
