@@ -26,17 +26,17 @@ const DashboardContainer = styled.div`
 
 const GlassPanel = styled.div`
   position: absolute;
-  left: 0;
+  left: 20px;
   top: 0;
   bottom: 0;
   width: 150px;
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(10px);
-  border-radius: 30px 0 0 30px;
+  border-radius: 30px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 100px;
+  padding-top: 200px;
   z-index: 10;
 `;
 
@@ -71,7 +71,7 @@ const Header = styled.header`
 
 const Logo = styled(motion.div)`
   position: absolute;
-  top: 20px;
+  top: 30px;
   left: 25px;
   z-index: 20;
   
@@ -135,6 +135,18 @@ const GlowingOrb = styled.div`
   z-index: 1;
 `;
 
+const FloatingIcons = styled.div`
+  position: absolute;
+  left: 150px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: center;
+  z-index: 10;
+`;
+
 const MinimalistDashboard = () => {
   // Gebruik de gedeelde dashboard controller voor tijd en datum
   const { currentTime } = useDashboard();
@@ -194,7 +206,7 @@ const MinimalistDashboard = () => {
   
   return (
     <DashboardContainer>
-      <GlassPanel>
+      <FloatingIcons>
         <IconButton>
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M20 4H4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V6C22 4.9 21.1 4 20 4ZM20 18H4V8L12 13L20 8V18ZM12 11L4 6H20L12 11Z" fill="currentColor"/>
@@ -225,7 +237,7 @@ const MinimalistDashboard = () => {
             <path d="M11 15H13V17H11V15Z" fill="currentColor"/>
           </svg>
         </IconButton>
-      </GlassPanel>
+      </FloatingIcons>
       
       <Logo
         ref={logoRef}
