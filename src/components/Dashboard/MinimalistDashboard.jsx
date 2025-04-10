@@ -6,6 +6,7 @@ import { useDashboard } from './DashboardController';
 // import ContextCards from './ContextCards'; // Verwijderd omdat we deze niet meer gebruiken
 import RealtimeVoiceInterface from '../UI/RealtimeVoiceInterface';
 import PulsingOrb from '../UI/PulsingOrb';
+import ElevenLabsWidget from '../UI/ElevenLabsWidget';
 import logo from '../../components/UI/logo-coliblanco.png';
 import { textToSpeech } from '../../utils/openai';
 
@@ -824,6 +825,7 @@ const MinimalistDashboard = () => {
           
           <VoiceContainer>
             <RealtimeVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
+            <ElevenLabsWidget />
           </VoiceContainer>
           
           <TextInputContainer>
@@ -889,6 +891,7 @@ const MinimalistDashboard = () => {
         {/* Voice interface voor mobiel */}
         <MobileVoiceSection>
           <RealtimeVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
+          <ElevenLabsWidget />
         </MobileVoiceSection>
         
         {/* Navigatie voor mobiel */}

@@ -328,97 +328,117 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
     }
   };
   
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      console.log('Opname stoppen...');
+      mediaRecorderRef.current.stop();
+      
+      // Stop alle tracks in de stream
+      if (mediaRecorderRef.current.stream) {
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      }
+    }
+    
+    stopSilenceDetection();
+    setIsListening(false);
+  };
+  
   const startRecording = async () => {
     try {
+      // Vraag toegang tot de microfoon
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      if (realtimeSessionRef.current) {
-        realtimeSessionRef.current.close();
-        realtimeSessionRef.current = null;
-      }
+      // Initialiseer de audio context voor geluidsanalyse
+      await initAudioContext(stream);
       
-      realtimeSessionRef.current = await setupRealtimeSession({
-        onTranscriptDelta: (text) => {
-          console.log('Realtime transcriptie delta:', text);
-          setTranscript((prev) => prev + text);
-          setShowTranscript(true);
-        },
-        onTranscriptComplete: (fullText) => {
-          console.log('Realtime transcriptie compleet:', fullText);
-          setTranscript(fullText);
-          setShowTranscript(true);
+      // Maak een MediaRecorder om audio op te nemen
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      
+      // Verzamel audiochunks tijdens het opnemen
+      audioChunksRef.current = [];
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      // Verwerk de audio wanneer de opname stopt
+      mediaRecorderRef.current.onstop = async () => {
+        try {
+          // Maak een blob van de verzamelde audiochunks
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           
-          if (!fullText.trim()) {
-            console.log('Geen tekst gedetecteerd, opnieuw beginnen met luisteren');
+          // Reset de audiochunks
+          audioChunksRef.current = [];
+          
+          // Als er geen audio is, stop dan
+          if (audioBlob.size === 0) {
+            console.log('Geen audio opgenomen');
+            setIsListening(false);
             return;
           }
           
+          console.log('Audio opname verwerken...');
           setIsProcessing(true);
-          processWithLLM(fullText).then(response => {
+          
+          try {
+            // Transcribeer de audio naar tekst
+            const transcription = await transcribeAudio(audioBlob);
+            console.log('Transcriptie ontvangen:', transcription);
+            
+            // Toon de transcriptie
+            setTranscript(transcription);
+            setShowTranscript(true);
+            
+            // Als er geen tekst is, stop dan
+            if (!transcription.trim()) {
+              console.log('Geen tekst gedetecteerd');
+              setIsProcessing(false);
+              return;
+            }
+            
+            // Verwerk de tekst met het taalmodel
+            const response = await processWithLLM(transcription);
             console.log('LLM antwoord ontvangen:', response);
             
+            // Toon het antwoord
             setAiResponse(response);
             setShowResponse(true);
             
-            speakResponse(response);
+            // Spreek het antwoord uit
+            await speakResponse(response);
             
+            // Verwerk het commando als dat nodig is
             if (processCommand) {
               processCommand(response);
             }
-            
+          } catch (error) {
+            console.error('Fout bij verwerken van audio:', error);
+            setErrorMessage(`Fout bij verwerken van audio: ${error.message}`);
+          } finally {
             setIsProcessing(false);
-          }).catch(error => {
-            console.error('Fout bij verwerken van transcriptie:', error);
-            setErrorMessage(`Fout bij verwerken van transcriptie: ${error.message}`);
-            setIsProcessing(false);
-          });
-        },
-        onSpeechStart: () => {
-          console.log('Spraak gedetecteerd door Realtime API');
-        },
-        onSpeechEnd: () => {
-          console.log('Einde van spraak gedetecteerd door Realtime API');
-        },
-        onError: (error) => {
-          console.error('Realtime API fout:', error);
-          setErrorMessage(`Realtime API fout: ${error.message}`);
-          stopRecording();
-        },
-        onClose: () => {
-          console.log('Realtime API verbinding gesloten');
-          setIsListening(false);
-        },
-        useVAD: true, 
-        vadOptions: {
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 1500
+          }
+        } catch (error) {
+          console.error('Fout bij verwerken van opname:', error);
+          setErrorMessage(`Fout bij verwerken van opname: ${error.message}`);
+          setIsProcessing(false);
         }
-      });
+      };
       
-      await initAudioContext(stream);
-      
+      // Start de opname
+      mediaRecorderRef.current.start();
       setIsListening(true);
+      setShowTranscript(false);
+      setShowResponse(false);
+      setTranscript('');
+      setAiResponse('');
       setErrorMessage('');
-      console.log('Realtime API sessie gestart');
       
-      lastSoundTimestampRef.current = Date.now();
+      console.log('Opname gestart');
     } catch (error) {
       console.error('Fout bij starten opname:', error);
       setErrorMessage(`Fout bij starten opname: ${error.message}`);
     }
-  };
-  
-  const stopRecording = () => {
-    if (realtimeSessionRef.current) {
-      realtimeSessionRef.current.close();
-      realtimeSessionRef.current = null;
-    }
-    
-    stopSilenceDetection();
-    
-    setIsListening(false);
-    console.log('Opname gestopt');
   };
   
   const startNextListeningSession = () => {

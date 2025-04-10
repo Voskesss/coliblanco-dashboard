@@ -1,8 +1,8 @@
 // OpenAI Realtime API implementatie met WebRTC
 
 // Configuratie voor de Realtime API
-const REALTIME_API_URL = 'https://api.openai.com/v1/realtime';
-const REALTIME_MODEL = 'gpt-4o-realtime-preview';
+const REALTIME_API_URL = 'https://api.openai.com/v1';
+const REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17';
 
 // Functie om een ephemeral token op te halen van de server
 async function getEphemeralToken() {
@@ -52,16 +52,15 @@ export const setupRealtimeSession = async (options = {}) => {
     
     // Haal een ephemeral token op van de server
     const token = await getEphemeralToken();
-    console.log('Ephemeral token ontvangen, verbinding maken met Realtime API...');
+    console.log('Ephemeral token opgehaald');
     
-    // Maak een WebRTC verbinding met de OpenAI Realtime API
+    // Maak een nieuwe RTCPeerConnection
     const peerConnection = new RTCPeerConnection();
     
-    // Maak een data channel voor het verzenden van berichten
-    const dataChannel = peerConnection.createDataChannel('events');
-    dataChannel.binaryType = 'arraybuffer';
+    // Maak een data channel voor het verzenden en ontvangen van berichten
+    const dataChannel = peerConnection.createDataChannel('oai-events');
     
-    // Stel de data channel event handlers in
+    // Configureer de data channel
     dataChannel.onopen = () => {
       console.log('Data channel geopend');
       if (options.onOpen) options.onOpen();
@@ -77,25 +76,19 @@ export const setupRealtimeSession = async (options = {}) => {
       if (options.onError) options.onError(error);
     };
     
-    // Verwerk berichten van de server
+    // Ontvang berichten van de server
     dataChannel.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
         console.log('Bericht ontvangen:', message);
         
-        // Verwerk verschillende soorten berichten
+        // Verwerk verschillende berichttypes
         switch (message.type) {
-          case 'transcript.delta':
-            if (options.onTranscriptDelta) options.onTranscriptDelta(message.delta.text);
+          case 'transcription':
+            if (options.onTranscription) options.onTranscription(message.text);
             break;
-          case 'transcript.complete':
-            if (options.onTranscriptComplete) options.onTranscriptComplete(message.transcript);
-            break;
-          case 'response.delta':
-            if (options.onTextDelta) options.onTextDelta(message.delta.text);
-            break;
-          case 'response.audio.delta':
-            if (options.onAudioDelta) options.onAudioDelta(message.delta.audio);
+          case 'response.partial':
+            if (options.onPartialResponse) options.onPartialResponse(message.text);
             break;
           case 'response.done':
             if (options.onResponseDone) options.onResponseDone(message);
@@ -119,30 +112,46 @@ export const setupRealtimeSession = async (options = {}) => {
     await peerConnection.setLocalDescription(offer);
     
     // Stuur de offer naar de OpenAI Realtime API
-    const response = await fetch(`${REALTIME_API_URL}/webrtc`, {
+    console.log(`Versturen van SDP naar ${REALTIME_API_URL}/realtime?model=${options.model || REALTIME_MODEL}`);
+    console.log('SDP:', offer.sdp.substring(0, 100) + '...');
+    
+    const response = await fetch(`${REALTIME_API_URL}/realtime?model=${options.model || REALTIME_MODEL}`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Content-Type': 'application/sdp',
+        'Authorization': `Bearer ${token}`,
+        'OpenAI-Beta': 'realtime=v1'
       },
-      body: JSON.stringify({
-        model: options.model || REALTIME_MODEL,
-        voice: options.voice || 'alloy',
-        sdp: offer.sdp,
-        type: offer.type
-      })
+      body: offer.sdp
     });
     
     if (!response.ok) {
-      throw new Error(`OpenAI API antwoordde met ${response.status}: ${response.statusText}`);
+      // Probeer de foutmelding te lezen als JSON
+      let errorMessage = `OpenAI API antwoordde met ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage += `: ${JSON.stringify(errorData)}`;
+      } catch (e) {
+        // Als het geen JSON is, probeer het als tekst te lezen
+        try {
+          const errorText = await response.text();
+          if (errorText) {
+            errorMessage += `: ${errorText}`;
+          }
+        } catch (e2) {
+          // Negeer deze fout
+        }
+      }
+      throw new Error(errorMessage);
     }
     
-    const data = await response.json();
+    // Haal de SDP uit de response als tekst
+    const sdpText = await response.text();
     
     // Stel het antwoord in als remote description
     await peerConnection.setRemoteDescription({
       type: 'answer',
-      sdp: data.sdp
+      sdp: sdpText
     });
     
     console.log('WebRTC verbinding opgezet');
@@ -151,328 +160,70 @@ export const setupRealtimeSession = async (options = {}) => {
     const audioElement = document.createElement('audio');
     audioElement.autoplay = true;
     
-    // Voeg audio tracks toe aan de audio element
+    // Voeg event listeners toe voor audio tracks
     peerConnection.ontrack = (event) => {
       console.log('Audio track ontvangen');
-      audioElement.srcObject = new MediaStream([event.track]);
+      audioElement.srcObject = event.streams[0];
+      if (options.onTrack) options.onTrack(event);
     };
     
-    // Functie om te beginnen met luisteren
-    const startListening = async () => {
+    // Functie om een audio stream toe te voegen aan de verbinding
+    const addAudioStream = async (stream) => {
       try {
-        console.log('Start luisteren...');
-        
-        // Vraag toegang tot de microfoon
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
-        // Voeg de audio tracks toe aan de peer connection
-        stream.getAudioTracks().forEach(track => {
+        console.log('Audio stream toevoegen aan verbinding');
+        stream.getTracks().forEach(track => {
           peerConnection.addTrack(track, stream);
         });
-        
-        console.log('Microfoon toegevoegd aan WebRTC verbinding');
-        
-        // Stuur een bericht naar de server om te beginnen met luisteren
-        dataChannel.send(JSON.stringify({
-          type: 'microphone.start'
-        }));
-        
-        return stream;
       } catch (error) {
-        console.error('Fout bij starten luisteren:', error);
-        throw error;
+        console.error('Fout bij toevoegen audio stream:', error);
+        if (options.onError) options.onError(error);
       }
     };
     
-    // Functie om te stoppen met luisteren
-    const stopListening = (stream) => {
+    // Functie om een bericht te verzenden naar de server
+    const sendMessage = (message) => {
       try {
-        console.log('Stop luisteren...');
-        
-        // Stop alle tracks in de stream
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
+        if (dataChannel.readyState === 'open') {
+          console.log('Bericht verzenden:', message);
+          dataChannel.send(JSON.stringify(message));
+          return true;
+        } else {
+          console.warn('Data channel niet open, bericht niet verzonden');
+          return false;
         }
-        
-        // Stuur een bericht naar de server om te stoppen met luisteren
-        dataChannel.send(JSON.stringify({
-          type: 'microphone.stop'
-        }));
-        
-        console.log('Microfoon gestopt');
       } catch (error) {
-        console.error('Fout bij stoppen luisteren:', error);
-        throw error;
-      }
-    };
-    
-    // Functie om een tekstbericht te versturen
-    const sendMessage = (text) => {
-      try {
-        console.log('Tekstbericht versturen:', text);
-        
-        // Stuur een bericht naar de server
-        dataChannel.send(JSON.stringify({
-          type: 'conversation.item.create',
-          item: {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: text
-              }
-            ]
-          }
-        }));
-        
-        console.log('Tekstbericht verstuurd');
-      } catch (error) {
-        console.error('Fout bij versturen tekstbericht:', error);
-        throw error;
+        console.error('Fout bij verzenden bericht:', error);
+        if (options.onError) options.onError(error);
+        return false;
       }
     };
     
     // Functie om de verbinding te sluiten
     const close = () => {
       try {
-        console.log('Verbinding sluiten...');
-        
-        // Sluit de data channel
-        dataChannel.close();
-        
-        // Sluit de peer connection
+        console.log('Verbinding sluiten');
+        if (dataChannel.readyState === 'open') {
+          dataChannel.close();
+        }
         peerConnection.close();
-        
-        console.log('Verbinding gesloten');
+        if (options.onClose) options.onClose();
       } catch (error) {
         console.error('Fout bij sluiten verbinding:', error);
+        if (options.onError) options.onError(error);
       }
     };
     
-    // Geef de sessie terug
+    // Geef de sessie interface terug
     return {
-      startListening,
-      stopListening,
+      peerConnection,
+      dataChannel,
+      audioElement,
+      addAudioStream,
       sendMessage,
       close
     };
   } catch (error) {
     console.error('Fout bij opzetten Realtime sessie:', error);
-    // Gooi de fout door in plaats van terug te vallen op de mock implementatie
-    throw new Error(`Fout bij opzetten Realtime sessie: ${error.message}`);
+    throw error; // Gooi de fout door in plaats van terug te vallen op een mock
   }
-};
-
-// Mock implementatie voor ontwikkeling en testen
-// Deze functie wordt niet meer automatisch gebruikt als fallback
-const setupMockRealtimeSession = (options = {}) => {
-  console.log('Mock Realtime sessie opzetten');
-  
-  // Maak een audio element voor het afspelen van audio
-  const audioElement = document.createElement('audio');
-  audioElement.autoplay = true;
-  audioElement.controls = true; // Voeg controls toe voor debugging
-  audioElement.style.position = 'fixed';
-  audioElement.style.bottom = '10px';
-  audioElement.style.left = '10px';
-  audioElement.style.zIndex = '1000';
-  audioElement.style.width = '300px';
-  
-  // Simuleer een verbinding
-  setTimeout(() => {
-    if (options.onOpen) options.onOpen();
-  }, 1000);
-  
-  // Simuleer functies voor de mock sessie
-  const startListening = () => {
-    console.log('Mock: Start luisteren...');
-    if (options.onSpeechStart) options.onSpeechStart();
-    
-    // Simuleer een transcript na een korte vertraging
-    setTimeout(() => {
-      if (options.onTranscriptDelta) {
-        const mockTranscript = 'Hallo, dit is een test van de mock realtime interface.';
-        for (let i = 0; i < mockTranscript.length; i++) {
-          setTimeout(() => {
-            options.onTranscriptDelta(mockTranscript[i]);
-          }, i * 50);
-        }
-      }
-    }, 2000);
-  };
-  
-  const stopListening = () => {
-    console.log('Mock: Stop luisteren...');
-    if (options.onSpeechEnd) options.onSpeechEnd();
-    
-    // Simuleer een antwoord na een korte vertraging
-    setTimeout(() => {
-      if (options.onTextDelta) {
-        const mockResponse = 'Hallo! Ik ben de mock assistent. Hoe kan ik je vandaag helpen?';
-        for (let i = 0; i < mockResponse.length; i++) {
-          setTimeout(() => {
-            options.onTextDelta(mockResponse[i]);
-          }, i * 50);
-        }
-      }
-      
-      // Simuleer spraak door een audio bestand af te spelen
-      playMockAudio();
-      
-      // Simuleer het einde van de response
-      setTimeout(() => {
-        if (options.onResponseDone) {
-          options.onResponseDone({
-            output: [
-              {
-                content: [
-                  {
-                    type: 'text',
-                    text: 'Hallo! Ik ben de mock assistent. Hoe kan ik je vandaag helpen?'
-                  }
-                ]
-              }
-            ]
-          });
-        }
-      }, 5000);
-    }, 1000);
-  };
-  
-  const sendMessage = (text) => {
-    console.log('Mock: Bericht versturen:', text);
-    if (options.onSpeechEnd) options.onSpeechEnd();
-    
-    // Simuleer een antwoord na een korte vertraging
-    setTimeout(() => {
-      if (options.onTextDelta) {
-        const mockResponse = `Je hebt gezegd: "${text}". Dit is een geautomatiseerd antwoord van de mock interface.`;
-        for (let i = 0; i < mockResponse.length; i++) {
-          setTimeout(() => {
-            options.onTextDelta(mockResponse[i]);
-          }, i * 30);
-        }
-      }
-      
-      // Simuleer spraak door een audio bestand af te spelen
-      playMockAudio();
-      
-      // Simuleer het einde van de response
-      setTimeout(() => {
-        if (options.onResponseDone) {
-          options.onResponseDone({
-            output: [
-              {
-                content: [
-                  {
-                    type: 'text',
-                    text: `Je hebt gezegd: "${text}". Dit is een geautomatiseerd antwoord van de mock interface.`
-                  }
-                ]
-              }
-            ]
-          });
-        }
-      }, 4000);
-    }, 1000);
-  };
-  
-  // Functie om mock audio af te spelen
-  const playMockAudio = () => {
-    try {
-      // Kies een willekeurig TTS audio bestand
-      const demoVoices = [
-        '/audio/demo1.mp3', // hello
-        '/audio/demo2.mp3', // welcome
-        '/audio/demo3.mp3', // thanks
-        '/audio/demo4.mp3'  // help
-      ];
-      
-      const randomIndex = Math.floor(Math.random() * demoVoices.length);
-      const voiceUrl = demoVoices[randomIndex];
-      
-      console.log('Afspelen van demo stem:', voiceUrl);
-      
-      // Reset het audio element eerst
-      audioElement.pause();
-      audioElement.currentTime = 0;
-      
-      // Wacht even voordat we de nieuwe bron instellen
-      setTimeout(() => {
-        // Gebruik een HTMLAudioElement voor het afspelen van het audio bestand
-        audioElement.src = voiceUrl;
-        audioElement.loop = false;
-        
-        // Speel de audio af
-        const playPromise = audioElement.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              console.log('Audio afspelen gestart');
-              
-              // Simuleer een audio track event
-              if (options.onTrack) {
-                options.onTrack({
-                  streams: [{ id: 'mock-stream-' + Date.now() }]
-                });
-              }
-            })
-            .catch(e => {
-              console.error('Fout bij afspelen audio:', e);
-              
-              // Probeer opnieuw met een user interaction
-              const unlockButton = document.createElement('button');
-              unlockButton.textContent = 'Klik hier om audio te activeren';
-              unlockButton.style.position = 'fixed';
-              unlockButton.style.top = '50%';
-              unlockButton.style.left = '50%';
-              unlockButton.style.transform = 'translate(-50%, -50%)';
-              unlockButton.style.padding = '10px 20px';
-              unlockButton.style.backgroundColor = '#FF9800';
-              unlockButton.style.color = 'white';
-              unlockButton.style.border = 'none';
-              unlockButton.style.borderRadius = '5px';
-              unlockButton.style.zIndex = '9999';
-              
-              unlockButton.onclick = function() {
-                audioElement.play().catch(err => console.error('Nog steeds fout bij afspelen:', err));
-                document.body.removeChild(unlockButton);
-              };
-              
-              document.body.appendChild(unlockButton);
-            });
-        }
-      }, 200);
-    } catch (error) {
-      console.error('Fout bij afspelen mock audio:', error);
-    }
-  };
-  
-  const endSession = () => {
-    console.log('Mock: Sessie beëindigd');
-    if (options.onClose) options.onClose();
-    
-    // Stop audio als die speelt
-    if (audioElement) {
-      audioElement.pause();
-      audioElement.src = '';
-      if (audioElement.parentNode) {
-        audioElement.parentNode.removeChild(audioElement);
-      }
-    }
-  };
-  
-  // Voeg het audio element toe aan de DOM
-  document.body.appendChild(audioElement);
-  
-  return {
-    peerConnection: null,
-    dataChannel: null,
-    audioElement,
-    microphoneStream: null,
-    sendMessage,
-    startListening,
-    stopListening,
-    endSession
-  };
 };

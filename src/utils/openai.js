@@ -115,41 +115,19 @@ export const textToSpeech = async (text, instructions = null) => {
       return useBrowserTTS(text);
     }
     
-    // Bereid de aanvraag voor
-    const requestOptions = {
+    // Gebruik de gecentraliseerde configuratie
+    const response = await openai.audio.speech.create({
       model: config.models.openai.tts,
-      voice: 'ash',
-      speed: 1.0,
-      input: text
-    };
-    
-    // Voeg instructies toe als die er zijn
-    if (instructions) {
-      requestOptions.instructions = instructions;
-    } else {
-      // Standaard instructies als er geen zijn opgegeven
-      requestOptions.instructions = "Personality/affect: a high-energy cheerleader helping with administrative tasks\n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
-    }
-    
-    console.log('TTS aanvraag versturen met stem:', requestOptions.voice);
-    console.log('Steminstructies:', requestOptions.instructions);
-    
-    // Maak een response object met de juiste headers voor streaming
-    const response = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.openaiApiKey}`
-      },
-      body: JSON.stringify(requestOptions)
+      voice: config.models.openai.ttsVoice,
+      input: text,
+      instructions: instructions || config.models.openai.ttsInstructions
     });
     
-    if (!response.ok) {
-      throw new Error(`OpenAI API antwoordde met ${response.status}: ${response.statusText}`);
-    }
+    console.log(`TTS aanvraag verstuurd met stem: ${config.models.openai.ttsVoice}`);
     
-    // Haal de audio blob op
-    const audioBlob = await response.blob();
+    // Converteer de response naar een blob
+    const buffer = await response.arrayBuffer();
+    const audioBlob = new Blob([buffer], { type: 'audio/mpeg' });
     
     // Maak een URL voor de audio blob
     const audioUrl = URL.createObjectURL(audioBlob);
@@ -214,7 +192,7 @@ export const processSpeechToSpeech = async (audioBlob, context = {}) => {
     const quickAcknowledgement = "Ik denk na over je vraag...";
     
     // Optionele instructies voor de stem
-    const voiceInstructions = context.voiceInstructions || "Personality/affect: a high-energy cheerleader helping with administrative tasks \n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
+    const voiceInstructions = context.voiceInstructions || config.models.openai.ttsInstructions;
     
     // Gebruik de nieuwe textToSpeech functie met instructies
     const quickAudioPromise = textToSpeech(quickAcknowledgement, voiceInstructions);
