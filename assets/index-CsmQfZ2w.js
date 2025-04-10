@@ -1239,16 +1239,20 @@ Features: Uses motivational phrases, cheerful exclamations, and an energetic rhy
   }
 `;const e9=Q.div`
   position: absolute;
+  right: 30px; /* Naar rechts uitlijnen */
   bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
   z-index: 10;
+  background: rgba(255, 255, 255, 0.2); /* Glasachtig effect */
+  backdrop-filter: blur(10px);
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.2);
+  padding: 5px;
   
   @media (max-width: 480px) {
     position: relative;
     bottom: auto;
-    left: auto;
-    transform: none;
+    right: auto;
     margin: 10px auto 80px auto;
   }
 `,wb=Q.div`
