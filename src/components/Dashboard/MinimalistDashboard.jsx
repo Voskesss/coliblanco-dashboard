@@ -7,6 +7,7 @@ import RealtimeVoiceInterface from '../UI/RealtimeVoiceInterface';
 import ContextCards from './ContextCards';
 import PulsingOrb from '../UI/PulsingOrb';
 import logo from '../../components/UI/logo-coliblanco.png';
+import { textToSpeech } from '../../utils/openai';
 
 // Hoofdcontainer voor de hele applicatie
 const DashboardContainer = styled.div`
@@ -704,6 +705,18 @@ const MinimalistDashboard = () => {
         // Update de UI met het antwoord
         setLastCommand(response.response);
         setOrbStatus('active');
+        
+        // Spreek het antwoord uit met de textToSpeech functie
+        try {
+          const voiceInstructions = "Personality/affect: a high-energy cheerleader helping with administrative tasks \n\nVoice: Enthusiastic, and bubbly, with an uplifting and motivational quality.\n\nTone: Encouraging and playful, making even simple tasks feel exciting and fun.\n\nDialect: Casual and upbeat Dutch, using informal phrasing and pep talk-style expressions.\n\nPronunciation: Crisp and lively, with exaggerated emphasis on positive words to keep the energy high.\n\nFeatures: Uses motivational phrases, cheerful exclamations, and an energetic rhythm to create a sense of excitement and engagement.";
+          const audioUrl = await textToSpeech(response.response, voiceInstructions);
+          
+          // Speel de audio af
+          const audio = new Audio(audioUrl);
+          audio.play();
+        } catch (speechError) {
+          console.error('Fout bij tekst naar spraak conversie:', speechError);
+        }
         
         // Wacht even voordat we teruggaan naar idle status
         setTimeout(() => {
