@@ -111,6 +111,7 @@ const DesktopMessageContainer = styled.div`
   right: 80px;
   top: 50%;
   transform: translateY(-50%);
+  z-index: 3; /* Hoger dan de orb zodat de tekst altijd zichtbaar is */
   
   p {
     font-size: 3rem;
@@ -135,7 +136,7 @@ const DesktopGlowingOrb = styled.div`
   background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.1) 70%);
   filter: blur(30px);
   top: 50%;
-  left: 40%;
+  left: 30%; /* Verplaatst naar links om ruimte te maken voor de tekst */
   transform: translate(-50%, -50%);
   z-index: 1;
   box-shadow: 0 0 100px 40px rgba(255, 255, 255, 0.2);
@@ -148,7 +149,7 @@ const DesktopOrbCloud = styled(motion.div)`
   border-radius: 50%;
   background: radial-gradient(circle, rgba(255, 255, 255, 0) 40%, rgba(255, 255, 255, 0.05) 70%, rgba(255, 255, 255, 0.1) 100%);
   top: 50%;
-  left: 40%;
+  left: 30%; /* Verplaatst naar links om ruimte te maken voor de tekst */
   transform: translate(-50%, -50%);
   z-index: 0;
   pointer-events: none;
@@ -158,7 +159,7 @@ const DesktopOrbCloud = styled(motion.div)`
 const DesktopPulsingOrbContainer = styled.div`
   position: absolute;
   top: 50%;
-  left: 40%;
+  left: 30%; /* Verplaatst naar links om ruimte te maken voor de tekst */
   transform: translate(-50%, -50%);
   z-index: 2;
 `;
