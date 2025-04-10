@@ -14,7 +14,7 @@ import { useDashboard } from './DashboardController';
 const DashboardContainer = styled.div`
   width: 100vw;
   height: 100vh;
-  background: linear-gradient(135deg, #e6e9f0 0%, #d3cce3 50%, #e2d1c3 100%);
+  background: linear-gradient(135deg, #EED0BA 0%, #8BAED9 50%, #1B406F 100%);
   display: flex;
   flex-direction: column;
   padding: 2rem;
@@ -33,6 +33,8 @@ const GlassPanel = styled.div`
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(10px);
   border-radius: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -45,7 +47,8 @@ const IconButton = styled.button`
   height: 120px;
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.3);
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -58,6 +61,7 @@ const IconButton = styled.button`
   &:hover {
     background: rgba(255, 255, 255, 0.5);
     transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
   }
 `;
 
@@ -111,8 +115,12 @@ const MainContent = styled.main`
 `;
 
 const MessageContainer = styled.div`
-  text-align: center;
+  text-align: left;
   max-width: 800px;
+  position: absolute;
+  right: 80px;
+  top: 50%;
+  transform: translateY(-50%);
   
   p {
     font-size: 3rem;
@@ -124,15 +132,24 @@ const MessageContainer = styled.div`
 
 const GlowingOrb = styled.div`
   position: absolute;
-  width: 300px;
-  height: 300px;
+  width: 350px;
+  height: 350px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.2);
   filter: blur(40px);
   top: 50%;
-  left: 50%;
+  left: 40%;
   transform: translate(-50%, -50%);
   z-index: 1;
+  box-shadow: 0 0 80px 20px rgba(255, 255, 255, 0.3);
+`;
+
+const PulsingOrbContainer = styled.div`
+  position: absolute;
+  top: 50%;
+  left: 40%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
 `;
 
 const FloatingIcons = styled.div`
@@ -260,9 +277,11 @@ const MinimalistDashboard = () => {
       
       <MainContent>
         <GlowingOrb />
-        <PulsingOrb status={orbStatus} ref={orbRef} className="orb-ref" />
+        <PulsingOrbContainer>
+          <PulsingOrb status={orbStatus} ref={orbRef} className="orb-ref" />
+        </PulsingOrbContainer>
         <MessageContainer>
-          <p>{lastCommand || "Good morning, hope you had a great night!"}</p>
+          <p>{lastCommand || "Goedemorgen, ik hoop dat je lekker hebt geslapen!"}</p>
         </MessageContainer>
         {showCards && <ContextCards />}
       </MainContent>
