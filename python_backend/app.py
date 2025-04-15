@@ -1,23 +1,21 @@
 import os
+import uuid
 import time
 import json
 import logging
+import threading
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
+from flask_debugtoolbar import DebugToolbarExtension
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
-import openai
-import tempfile
-import uuid
-from pydub import AudioSegment
-import io
-import asyncio
-import threading
+from openai import OpenAI
 
-# Importeer onze eigen modules
+# Importeer de spraakverwerking en LLM modules
+# Maar importeer niet de client initialisatie
 from speech_processing import transcribe_audio, text_to_speech
-from llm_processing import process_with_llm
+from llm_processing import process_with_llm, analyze_intent
 
 # Laad environment variables
 load_dotenv()
@@ -28,12 +26,23 @@ logger = logging.getLogger(__name__)
 
 # Initialiseer de Flask app
 app = Flask(__name__)
-CORS(app)
+
+# Configureer CORS voor alle routes
+CORS(app, resources={r"/*": {"origins": os.getenv("ALLOWED_ORIGINS", "*").split(",")}})
+
+# Configureer de Debug Toolbar
+app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "ontwikkelingssleutel")
+app.config['DEBUG_TB_ENABLED'] = True
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
+toolbar = DebugToolbarExtension(app)
 
 # Configureer OpenAI API
-openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
     logger.error("OPENAI_API_KEY niet gevonden in environment variables!")
+
+# Initialiseer de OpenAI client zonder proxies
+openai_client = OpenAI(api_key=api_key)
 
 # Configureer SocketIO voor realtime communicatie
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -71,7 +80,7 @@ def transcribe():
         logger.info(f"Audio bestand ontvangen: {filepath}")
         
         # Transcribeer de audio
-        transcription = transcribe_audio(filepath)
+        transcription = transcribe_audio(filepath, openai_client)
         
         # Verwijder het bestand na gebruik
         os.remove(filepath)
@@ -86,6 +95,7 @@ def transcribe():
 def tts():
     """Endpoint voor tekst naar spraak conversie"""
     try:
+        # Controleer of we een JSON body hebben
         data = request.json
         if not data or 'text' not in data:
             return jsonify({"error": "Geen tekst ontvangen"}), 400
@@ -97,18 +107,23 @@ def tts():
         logger.info(f"TTS aanvraag ontvangen: {text[:50]}... (voice: {voice}, model: {model})")
         
         # Genereer spraak
-        audio_data = text_to_speech(text, voice, model)
-        
-        # Sla het bestand op
-        filename = f"{uuid.uuid4()}.mp3"
-        filepath = os.path.join(AUDIO_FOLDER, filename)
-        
-        with open(filepath, 'wb') as f:
-            f.write(audio_data)
-        
-        logger.info(f"Audio opgeslagen: {filepath}")
-        
-        return jsonify({"url": f"/audio/{filename}"})
+        try:
+            audio_data = text_to_speech(text, openai_client, voice, model)
+            logger.info(f"Audio gegenereerd: {len(audio_data)} bytes")
+            
+            # Sla het bestand op
+            filename = f"{uuid.uuid4()}.mp3"
+            filepath = os.path.join(AUDIO_FOLDER, filename)
+            
+            with open(filepath, 'wb') as f:
+                f.write(audio_data)
+            
+            logger.info(f"Audio opgeslagen: {filepath}")
+            
+            return jsonify({"url": f"/audio/{filename}"})
+        except Exception as e:
+            logger.error(f"Fout in text_to_speech: {str(e)}")
+            return jsonify({"error": f"Fout in spraakgeneratie: {str(e)}"}), 500
     
     except Exception as e:
         logger.error(f"Fout bij tekst naar spraak: {str(e)}")
@@ -128,11 +143,17 @@ def chat():
         max_tokens = data.get('max_tokens', 150)
         
         logger.info(f"Chat aanvraag ontvangen: {len(messages)} berichten")
+        logger.info(f"Berichten: {messages}")
+        logger.info(f"Model: {model}, Temperatuur: {temperature}, Max tokens: {max_tokens}")
         
         # Verwerk met LLM
-        response = process_with_llm(messages, model, temperature, max_tokens)
-        
-        return jsonify(response)
+        try:
+            response = process_with_llm(messages, openai_client, model, temperature, max_tokens)
+            logger.info(f"LLM antwoord: {response}")
+            return jsonify(response)
+        except Exception as e:
+            logger.error(f"Fout in process_with_llm: {str(e)}")
+            return jsonify({"error": f"Fout in LLM verwerking: {str(e)}"}), 500
     
     except Exception as e:
         logger.error(f"Fout bij chat completion: {str(e)}")
@@ -232,7 +253,7 @@ def process_audio(session_id):
             temp_filepath = temp_file.name
         
         # Transcribeer de audio
-        transcription = transcribe_audio(temp_filepath)
+        transcription = transcribe_audio(temp_filepath, openai_client)
         
         # Verwijder het tijdelijke bestand
         os.unlink(temp_filepath)
@@ -257,7 +278,7 @@ def process_audio(session_id):
         
         messages.append({"role": "user", "content": transcription})
         
-        response = process_with_llm(messages, 'gpt-4o', 0.7, 150)
+        response = process_with_llm(messages, openai_client, 'gpt-4o', 0.7, 150)
         assistant_message = response['choices'][0]['message']['content']
         
         # Update de conversatiegeschiedenis
@@ -277,7 +298,7 @@ def process_audio(session_id):
         }, room=session_id)
         
         # Genereer spraak voor het antwoord
-        audio_data = text_to_speech(assistant_message)
+        audio_data = text_to_speech(assistant_message, openai_client)
         
         # Sla het bestand op
         filename = f"{uuid.uuid4()}.mp3"
@@ -303,6 +324,12 @@ def process_audio(session_id):
             'error': str(e)
         }, room=session_id)
 
-if __name__ == '__main__':
-    port = int(os.getenv("PORT", 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=True, allow_unsafe_werkzeug=True)
+if __name__ == "__main__":
+    # Debug modus inschakelen voor automatisch verversen
+    app.debug = True
+    
+    # Poort instellen
+    port = int(os.getenv("PORT", 5001))  # Gewijzigd van 5000 naar 5001
+    
+    # Start de applicatie met hot reloading via SocketIO
+    socketio.run(app, host='0.0.0.0', port=port, debug=True, allow_unsafe_werkzeug=True, use_reloader=True)

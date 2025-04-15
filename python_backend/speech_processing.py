@@ -3,7 +3,6 @@ import logging
 import tempfile
 import io
 from pydub import AudioSegment
-import openai
 from dotenv import load_dotenv
 
 # Laad environment variables
@@ -13,17 +12,13 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configureer OpenAI API
-openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
-    logger.error("OPENAI_API_KEY niet gevonden in environment variables!")
-
-def transcribe_audio(audio_path):
+def transcribe_audio(audio_path, client):
     """
     Transcribeer audio naar tekst met OpenAI Whisper API
     
     Args:
         audio_path (str): Pad naar het audiobestand
+        client: OpenAI client
         
     Returns:
         str: Getranscribeerde tekst
@@ -56,7 +51,7 @@ def transcribe_audio(audio_path):
         # Open het audiobestand
         with open(audio_path, 'rb') as audio_file:
             # Roep de OpenAI API aan
-            response = openai.audio.transcriptions.create(
+            response = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file
             )
@@ -75,12 +70,13 @@ def transcribe_audio(audio_path):
         logger.error(f"Fout bij transcriberen: {str(e)}")
         raise
 
-def text_to_speech(text, voice="alloy", model="tts-1", instructions=None):
+def text_to_speech(text, client, voice="alloy", model="tts-1", instructions=None):
     """
     Converteer tekst naar spraak met OpenAI TTS API
     
     Args:
         text (str): Tekst om te converteren naar spraak
+        client: OpenAI client
         voice (str): Stem om te gebruiken (default: "alloy")
         model (str): Model om te gebruiken (default: "tts-1")
         instructions (str): Optionele instructies voor de stem
@@ -96,7 +92,7 @@ def text_to_speech(text, voice="alloy", model="tts-1", instructions=None):
             instructions = "Je bent een vriendelijke Nederlandse assistent. Spreek op een natuurlijke, warme manier in het Nederlands."
         
         # Roep de OpenAI API aan
-        response = openai.audio.speech.create(
+        response = client.audio.speech.create(
             model=model,
             voice=voice,
             input=text,
@@ -130,6 +126,6 @@ def detect_speech_in_realtime(audio_stream, callback, silence_threshold=500, sil
     Returns:
         None
     """
-    # Deze functie zou PyAudio gebruiken voor realtime spraakdetectie
-    # Dit is een complexe implementatie die we later kunnen uitwerken
+    # Implementatie van realtime spraakdetectie
+    # Dit is een placeholder voor toekomstige implementatie
     pass

@@ -1,24 +1,12 @@
-import OpenAI from 'openai';
 import { config } from './config';
 
-// Initialiseer de OpenAI client
-const openai = new OpenAI({
-  // Gebruik de API key alleen als die beschikbaar is
-  apiKey: config.openaiApiKey || 'dummy-key',
-  dangerouslyAllowBrowser: true // Sta toe dat de client in de browser draait (let op: alleen voor ontwikkeling)
-});
+// Basis URL voor de Python backend
+const PYTHON_BACKEND_URL = 'http://localhost:5001';
 
-// Echte functie voor spraak naar tekst conversie met OpenAI Whisper
+// Functie voor spraak naar tekst conversie via de Python backend
 export const transcribeAudio = async (audioBlob) => {
   try {
-    console.log('Transcriberen van audio met Whisper...');
-    
-    // Controleer of we een geldige API key hebben
-    if (!config.openaiApiKey) {
-      console.warn('Geen OpenAI API key gevonden, gebruik gesimuleerde transcriptie');
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      return "Dit is een gesimuleerde transcriptie van spraak naar tekst.";
-    }
+    console.log('Transcriberen van audio via Python backend...');
     
     // Controleer of we een audioBlob hebben
     if (!audioBlob) {
@@ -26,58 +14,43 @@ export const transcribeAudio = async (audioBlob) => {
       return "Geen audio ontvangen. Dit is een gesimuleerde transcriptie.";
     }
     
-    // Zorg ervoor dat de audioBlob het juiste type heeft
-    let processedBlob = audioBlob;
+    // Maak een FormData object om de audio te versturen
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.webm');
     
-    // Als de blob niet het juiste type heeft, maak een nieuwe blob met het juiste type
-    if (audioBlob.type !== 'audio/mp3' && audioBlob.type !== 'audio/mpeg' && audioBlob.type !== 'audio/wav') {
-      console.log('Converteren van audioBlob naar mp3 formaat...');
-      // Converteer de blob naar een formaat dat OpenAI accepteert
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      processedBlob = new Blob([arrayBuffer], { type: 'audio/mp3' });
-    }
-    
-    // Voeg een bestandsnaam toe aan de blob
-    const file = new File([processedBlob], 'audio.mp3', { type: 'audio/mp3' });
-    
-    console.log('Audio bestand voorbereid, type:', file.type, 'grootte:', file.size, 'bytes');
-    
-    // Roep de Whisper API aan
-    const transcription = await openai.audio.transcriptions.create({
-      file: file,
-      model: config.models.openai.stt,
-      language: 'nl',
+    // Roep de Python backend aan
+    const response = await fetch(`${PYTHON_BACKEND_URL}/transcribe`, {
+      method: 'POST',
+      body: formData
     });
     
-    console.log('Transcriptie ontvangen:', transcription.text);
-    return transcription.text;
+    if (!response.ok) {
+      throw new Error(`Backend antwoordde met ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    console.log('Transcriptie ontvangen:', data);
+    
+    return data.text;
   } catch (error) {
-    console.error('Fout bij transcriberen:', error);
-    return "Er is een fout opgetreden bij het transcriberen. Dit is een gesimuleerde transcriptie.";
+    console.error('Fout bij transcriberen van audio:', error);
+    return "Er is een fout opgetreden bij het transcriberen van de audio.";
   }
 };
 
-// Echte functie voor het verwerken van tekst met het LLM
-export const processWithLLM = async (text, context = {}) => {
+// Functie voor het verwerken van tekst met het LLM via de Python backend
+export const processWithLLM = async (userText, context = {}) => {
   try {
-    console.log('Verwerken van tekst met GPT...');
-    
-    // Controleer of we een geldige API key hebben
-    if (!config.openaiApiKey) {
-      console.warn('Geen OpenAI API key gevonden, gebruik gesimuleerd antwoord');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return `Ik heb je bericht "${text}" ontvangen. Hier is mijn antwoord als assistent.`;
-    }
-    
-    // Als er een userText in de context zit, gebruik die in plaats van de transcriptie
-    const userText = context.userText || text;
+    console.log('Verwerken van tekst met LLM via Python backend...');
+    console.log('Context:', context);
     
     // Bereid de berichten voor
     let messages = [
       {
         role: "system",
-        content: `Je bent een behulpzame assistent voor Coliblanco. 
-                 Huidige tijd: ${new Date().toLocaleString('nl-NL')}.
+        content: `Je bent een vriendelijke Nederlandse assistent voor het Coliblanco Dashboard. 
+                 Je geeft korte, behulpzame antwoorden in het Nederlands. 
+                 Wees beleefd, informatief en to-the-point.
                  Houd je antwoorden kort en bondig, maar wel vriendelijk en behulpzaam.
                  Spreek Nederlands.`
       }
@@ -92,28 +65,35 @@ export const processWithLLM = async (text, context = {}) => {
     // Voeg het huidige bericht van de gebruiker toe
     messages.push({ role: "user", content: userText });
     
-    // Voeg context toe als die er is
-    if (context && Object.keys(context).length > 0 && !context.userText && !context.conversationHistory) {
-      messages[0].content += `\nContext: ${JSON.stringify(context)}`;
-    }
-    
-    console.log('Berichten naar OpenAI:', messages);
-    
-    // Roep de OpenAI API aan
-    const completion = await openai.chat.completions.create({
-      model: config.models.openai.llm,
-      messages: messages,
+    // Roep de Python backend aan
+    const response = await fetch(`${PYTHON_BACKEND_URL}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messages: messages,
+        model: config.models.openai.llm,
+        temperature: 0.7,
+        max_tokens: 150
+      })
     });
     
-    const response = completion.choices[0].message.content;
-    console.log('GPT antwoord ontvangen:', response);
+    if (!response.ok) {
+      throw new Error(`Backend antwoordde met ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    console.log('LLM antwoord ontvangen:', data);
+    
+    const assistantMessage = data.choices[0].message.content;
     
     // Maak een nieuw antwoord object dat ook de bijgewerkte conversatiegeschiedenis bevat
     const result = {
-      response: response,
+      response: assistantMessage,
       conversationHistory: [...(context.conversationHistory || []), 
-                           { role: "user", content: userText }, 
-                           { role: "assistant", content: response }]
+                         { role: "user", content: userText }, 
+                         { role: "assistant", content: assistantMessage }]
     };
     
     return result;
@@ -126,125 +106,95 @@ export const processWithLLM = async (text, context = {}) => {
   }
 };
 
-// Echte functie voor tekst naar spraak conversie met OpenAI
+// Functie voor tekst naar spraak conversie via de Python backend
 export const textToSpeech = async (text, instructions = null) => {
   try {
-    console.log('Tekst naar spraak omzetten met TTS...');
+    console.log('Tekst naar spraak omzetten via Python backend...');
     
     // Controleer of het een object is met een response veld
     const inputText = typeof text === 'object' && text.response ? text.response : text;
     
-    // Controleer of we een geldige API key hebben
-    if (!config.openaiApiKey) {
-      console.warn('Geen OpenAI API key gevonden, gebruik stille fallback');
-      return useBrowserTTS(inputText);
+    // Roep de Python backend aan
+    const response = await fetch(`${PYTHON_BACKEND_URL}/tts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: inputText,
+        voice: config.models.openai.ttsVoice,
+        model: config.models.openai.tts,
+        instructions: instructions || config.models.openai.ttsInstructions
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Backend antwoordde met ${response.status}: ${response.statusText}`);
     }
     
-    // Gebruik de gecentraliseerde configuratie
-    const response = await openai.audio.speech.create({
-      model: config.models.openai.tts,
-      voice: config.models.openai.ttsVoice,
-      input: inputText,
-      instructions: instructions || config.models.openai.ttsInstructions
-    });
+    const data = await response.json();
+    console.log('TTS URL ontvangen:', data);
     
-    console.log(`TTS aanvraag verstuurd met stem: ${config.models.openai.ttsVoice}`);
-    
-    // Converteer de response naar een blob
-    const buffer = await response.arrayBuffer();
-    const audioBlob = new Blob([buffer], { type: 'audio/mpeg' });
-    
-    // Maak een URL voor de audio blob
-    const audioUrl = URL.createObjectURL(audioBlob);
-    
-    console.log('Audio URL gemaakt:', audioUrl);
-    
-    // Preload de audio om sneller te kunnen afspelen
-    const audio = new Audio(audioUrl);
-    audio.preload = 'auto';
-    await new Promise(resolve => {
-      audio.oncanplaythrough = resolve;
-      audio.load();
-    });
+    // Maak de volledige URL voor de audio
+    const audioUrl = `${PYTHON_BACKEND_URL}${data.url}`;
     
     return audioUrl;
   } catch (error) {
     console.error('Fout bij tekst naar spraak conversie:', error);
-    // Gebruik stille fallback als OpenAI TTS mislukt
     return useBrowserTTS(text);
   }
 };
 
-// Helper functie voor browser spraaksynthese als fallback (nu uitgeschakeld)
+// Helper functie voor browser spraaksynthese als fallback
 const useBrowserTTS = (text) => {
-  console.warn('Browser TTS is uitgeschakeld, geen audio afgespeeld');
-  return new Promise((resolve) => {
-    // Retourneer een dummy URL zonder echte audio
-    setTimeout(() => {
-      resolve('dummy-audio-url-silent');
-    }, 100);
-  });
+  console.warn('Fallback naar browser TTS...');
+  // Deze functie gebruikt de browser's ingebouwde spraaksynthese als fallback
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'nl-NL';
+  window.speechSynthesis.speak(utterance);
+  return null; // Geen audio URL in dit geval
 };
 
 // Volledige chained functie voor spraak-naar-spraak verwerking
 export const processSpeechToSpeech = async (audioBlob, context = {}) => {
   try {
-    // Toon een vroege feedback voordat we beginnen met verwerken
-    console.log('Start van spraak-naar-spraak verwerking');
+    // Stap 1: Transcribeer de audio naar tekst
+    const transcription = await transcribeAudio(audioBlob);
+    console.log('Transcriptie:', transcription);
     
-    // Stap 1: Transcribeer audio naar tekst als we een audioBlob hebben
-    let transcription = "";
-    if (audioBlob) {
-      transcription = await transcribeAudio(audioBlob);
-      console.log('Transcriptie:', transcription);
-    } else if (context.userText) {
-      // Als er geen audioBlob is maar wel userText, gebruik die
-      transcription = context.userText;
-      console.log('Gebruiker tekst:', transcription);
-    } else {
+    // Als er geen transcriptie is, stop dan
+    if (!transcription || transcription.trim() === '') {
+      console.warn('Geen tekst gedetecteerd in de audio');
       return {
-        transcription: "Geen audio of tekst ontvangen.",
-        response: "Ik kon geen audio of tekst verwerken. Probeer het opnieuw.",
-        audioUrl: await textToSpeech("Ik kon geen audio of tekst verwerken. Probeer het opnieuw.")
+        transcription: '',
+        response: '',
+        audioUrl: null,
+        error: 'Geen tekst gedetecteerd in de audio'
       };
     }
     
     // Stap 2: Verwerk de tekst met het LLM
-    // Start de TTS verwerking parallel met de LLM verwerking voor snellere respons
-    const llmPromise = processWithLLM(transcription, context);
-    
-    // Maak alvast een korte bevestiging klaar terwijl we wachten op het volledige antwoord
-    const quickAcknowledgement = "Ik denk na over je vraag...";
-    
-    // Optionele instructies voor de stem
-    const voiceInstructions = context.voiceInstructions || config.models.openai.ttsInstructions;
-    
-    // Gebruik de nieuwe textToSpeech functie met instructies
-    const quickAudioPromise = textToSpeech(quickAcknowledgement, voiceInstructions);
-    
-    // Wacht op het LLM antwoord
-    const response = await llmPromise;
-    console.log('LLM antwoord:', response);
+    const llmResponse = await processWithLLM(transcription, context);
+    console.log('LLM antwoord:', llmResponse);
     
     // Stap 3: Converteer het antwoord naar spraak
-    // Gebruik de nieuwe textToSpeech functie met instructies
-    const audioUrl = await textToSpeech(response.response, voiceInstructions);
+    const audioUrl = await textToSpeech(llmResponse.response);
+    console.log('Audio URL:', audioUrl);
     
-    // Stap 4: Geef het resultaat terug
+    // Geef het resultaat terug
     return {
-      transcription,
-      response: response.response,
-      conversationHistory: response.conversationHistory,
-      audioUrl,
-      quickAudioUrl: await quickAudioPromise
+      transcription: transcription,
+      response: llmResponse.response,
+      audioUrl: audioUrl,
+      conversationHistory: llmResponse.conversationHistory
     };
   } catch (error) {
-    console.error('Fout in spraak-naar-spraak verwerking:', error);
+    console.error('Fout bij spraak-naar-spraak verwerking:', error);
     return {
-      transcription: "Er is een fout opgetreden.",
-      response: "Er is een fout opgetreden bij het verwerken van je vraag. Probeer het opnieuw.",
-      conversationHistory: context.conversationHistory || [],
-      audioUrl: await textToSpeech("Er is een fout opgetreden bij het verwerken van je vraag. Probeer het opnieuw.")
+      transcription: '',
+      response: 'Er is een fout opgetreden bij het verwerken van je vraag.',
+      audioUrl: null,
+      error: error.message
     };
   }
 };
