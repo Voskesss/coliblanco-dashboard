@@ -1,7 +1,9 @@
 import { config } from './config';
+import { environment } from './environment';
+import io from 'socket.io-client';
 
 // Basis URL voor de Python backend
-const PYTHON_BACKEND_URL = 'http://localhost:5001';
+const PYTHON_BACKEND_URL = environment.backendUrl;
 
 // Functie voor spraak naar tekst conversie via de Python backend
 export const transcribeAudio = async (audioBlob) => {
@@ -197,4 +199,342 @@ export const processSpeechToSpeech = async (audioBlob, context = {}) => {
       error: error.message
     };
   }
+};
+
+// Nieuwe functie voor het opzetten van een WebSocket verbinding voor realtime spraakverwerking
+export const setupRealtimeVoiceProcessing = () => {
+  // Controleer of de browser WebSockets ondersteunt
+  if (!window.WebSocket) {
+    console.error('WebSockets worden niet ondersteund door deze browser');
+    return null;
+  }
+  
+  let socket = null;
+  let isConnected = false;
+  let isListening = false;
+  let mediaRecorder = null;
+  let audioContext = null;
+  let analyser = null;
+  let sessionId = null;
+  let callbacks = {};
+  
+  // Functie om de WebSocket verbinding op te zetten
+  const connect = () => {
+    try {
+      // Maak een nieuwe WebSocket verbinding
+      socket = io(PYTHON_BACKEND_URL, {
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+      });
+      
+      // Event handlers voor de WebSocket verbinding
+      socket.on('connect', () => {
+        console.log('WebSocket verbonden');
+        isConnected = true;
+        if (callbacks.onConnect) callbacks.onConnect();
+      });
+      
+      socket.on('connected', (data) => {
+        console.log('Sessie ID ontvangen:', data);
+        sessionId = data.session_id;
+        if (callbacks.onSessionStart) callbacks.onSessionStart(data);
+      });
+      
+      socket.on('disconnect', () => {
+        console.log('WebSocket verbinding verbroken');
+        isConnected = false;
+        isListening = false;
+        if (callbacks.onDisconnect) callbacks.onDisconnect();
+      });
+      
+      socket.on('listening_started', (data) => {
+        console.log('Luisteren gestart:', data);
+        isListening = true;
+        if (callbacks.onListeningStart) callbacks.onListeningStart(data);
+      });
+      
+      socket.on('listening_stopped', (data) => {
+        console.log('Luisteren gestopt:', data);
+        isListening = false;
+        if (callbacks.onListeningStop) callbacks.onListeningStop(data);
+      });
+      
+      socket.on('transcription', (data) => {
+        console.log('Transcriptie ontvangen:', data);
+        if (callbacks.onTranscription) callbacks.onTranscription(data);
+      });
+      
+      socket.on('llm_response', (data) => {
+        console.log('LLM antwoord ontvangen:', data);
+        if (callbacks.onLLMResponse) callbacks.onLLMResponse(data);
+      });
+      
+      socket.on('tts_response', (data) => {
+        console.log('TTS antwoord ontvangen:', data);
+        // Maak de volledige URL voor de audio
+        data.fullUrl = `${PYTHON_BACKEND_URL}${data.url}`;
+        if (callbacks.onTTSResponse) callbacks.onTTSResponse(data);
+      });
+      
+      socket.on('processing_complete', (data) => {
+        console.log('Verwerking voltooid:', data);
+        if (callbacks.onProcessingComplete) callbacks.onProcessingComplete(data);
+      });
+      
+      socket.on('error', (error) => {
+        console.error('WebSocket fout:', error);
+        if (callbacks.onError) callbacks.onError(error);
+      });
+      
+      return true;
+    } catch (error) {
+      console.error('Fout bij opzetten WebSocket verbinding:', error);
+      if (callbacks.onError) callbacks.onError(error);
+      return false;
+    }
+  };
+  
+  // Functie om de microfoon te initialiseren
+  const initMicrophone = async () => {
+    try {
+      // Vraag toestemming voor microfoon
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
+      
+      // Maak een MediaRecorder voor de audio
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm',
+        audioBitsPerSecond: 128000
+      });
+      
+      // Maak een AudioContext voor geluidsanalyse
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      
+      // Event handlers voor de MediaRecorder
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && isListening && socket && socket.connected) {
+          // Converteer de audio data naar een ArrayBuffer
+          event.data.arrayBuffer().then(buffer => {
+            // Stuur de audio data naar de server
+            socket.emit('audio_chunk', { audio_data: new Uint8Array(buffer) });
+          });
+        }
+      };
+      
+      return true;
+    } catch (error) {
+      console.error('Fout bij initialiseren microfoon:', error);
+      if (callbacks.onError) callbacks.onError(error);
+      return false;
+    }
+  };
+  
+  // Functie om te beginnen met luisteren
+  const startListening = async () => {
+    if (!isConnected) {
+      console.error('Niet verbonden met WebSocket');
+      return false;
+    }
+    
+    if (isListening) {
+      console.warn('Al aan het luisteren');
+      return true;
+    }
+    
+    try {
+      // Initialiseer de microfoon als dat nog niet is gebeurd
+      if (!mediaRecorder) {
+        const success = await initMicrophone();
+        if (!success) return false;
+      }
+      
+      // Stuur een bericht naar de server om te beginnen met luisteren
+      socket.emit('start_listening');
+      
+      // Start de MediaRecorder
+      mediaRecorder.start(100); // Neem op in chunks van 100ms
+      
+      return true;
+    } catch (error) {
+      console.error('Fout bij starten met luisteren:', error);
+      if (callbacks.onError) callbacks.onError(error);
+      return false;
+    }
+  };
+  
+  // Functie om te stoppen met luisteren
+  const stopListening = (manualStop = true) => {
+    if (!isConnected) {
+      console.error('Niet verbonden met WebSocket');
+      return false;
+    }
+    
+    if (!isListening) {
+      console.warn('Niet aan het luisteren');
+      return true;
+    }
+    
+    try {
+      // Stop de MediaRecorder
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+      
+      // Stuur een bericht naar de server om te stoppen met luisteren
+      socket.emit('stop_listening', { manual_stop: manualStop });
+      
+      return true;
+    } catch (error) {
+      console.error('Fout bij stoppen met luisteren:', error);
+      if (callbacks.onError) callbacks.onError(error);
+      return false;
+    }
+  };
+  
+  // Functie om een interruptie te sturen
+  const sendInterrupt = () => {
+    if (!isConnected) {
+      console.error('Niet verbonden met WebSocket');
+      return false;
+    }
+    
+    try {
+      socket.emit('interrupt');
+      return true;
+    } catch (error) {
+      console.error('Fout bij versturen interruptie:', error);
+      if (callbacks.onError) callbacks.onError(error);
+      return false;
+    }
+  };
+  
+  // Functie om de verbinding te verbreken
+  const disconnect = () => {
+    try {
+      // Stop eerst met luisteren als dat nog niet is gebeurd
+      if (isListening) {
+        stopListening();
+      }
+      
+      // Stop de MediaRecorder en sluit de stream
+      if (mediaRecorder) {
+        if (mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();
+        }
+        
+        // Sluit de stream
+        if (mediaRecorder.stream) {
+          mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        }
+        
+        mediaRecorder = null;
+      }
+      
+      // Sluit de AudioContext
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+        analyser = null;
+      }
+      
+      // Verbreek de WebSocket verbinding
+      if (socket) {
+        socket.disconnect();
+        socket = null;
+      }
+      
+      isConnected = false;
+      isListening = false;
+      sessionId = null;
+      
+      return true;
+    } catch (error) {
+      console.error('Fout bij verbreken verbinding:', error);
+      if (callbacks.onError) callbacks.onError(error);
+      return false;
+    }
+  };
+  
+  // Functie om callbacks te registreren
+  const registerCallbacks = (newCallbacks) => {
+    callbacks = { ...callbacks, ...newCallbacks };
+  };
+  
+  // Functie om het geluidsniveau te monitoren
+  const getAudioLevel = () => {
+    if (!analyser) return 0;
+    
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(dataArray);
+    
+    // Bereken het gemiddelde geluidsniveau
+    const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+    
+    // Normaliseer naar een waarde tussen 0 en 100
+    return Math.min(100, Math.max(0, average * 2));
+  };
+  
+  // Functie om de stiltedetectie te starten
+  const startSilenceDetection = (silenceThreshold = 10, silenceDuration = 1500) => {
+    if (!isListening || !analyser) return false;
+    
+    let silenceStart = null;
+    let silenceDetectionInterval = null;
+    
+    silenceDetectionInterval = setInterval(() => {
+      const level = getAudioLevel();
+      
+      // Als het geluidsniveau onder de drempelwaarde is, detecteer stilte
+      if (level < silenceThreshold) {
+        if (silenceStart === null) {
+          silenceStart = Date.now();
+        } else if (Date.now() - silenceStart > silenceDuration) {
+          // Als de stilte lang genoeg duurt, stop met luisteren
+          console.log('Stilte gedetecteerd, stop met luisteren');
+          stopListening(false); // Niet handmatig gestopt
+          clearInterval(silenceDetectionInterval);
+        }
+      } else {
+        // Reset de stiltedetectie als er geluid is
+        silenceStart = null;
+      }
+    }, 100);
+    
+    return silenceDetectionInterval;
+  };
+  
+  // Functie om de stiltedetectie te stoppen
+  const stopSilenceDetection = (interval) => {
+    if (interval) {
+      clearInterval(interval);
+    }
+  };
+  
+  // Geef de publieke API terug
+  return {
+    connect,
+    disconnect,
+    startListening,
+    stopListening,
+    sendInterrupt,
+    registerCallbacks,
+    getAudioLevel,
+    startSilenceDetection,
+    stopSilenceDetection,
+    isConnected: () => isConnected,
+    isListening: () => isListening,
+    getSessionId: () => sessionId
+  };
 };

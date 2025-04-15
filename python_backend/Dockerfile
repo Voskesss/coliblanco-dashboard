@@ -20,7 +20,11 @@ COPY . .
 RUN mkdir -p uploads audio
 
 # Poort waarop de applicatie draait
-EXPOSE 5000
+EXPOSE 5001
+
+# Omgevingsvariabelen voor Azure
+ENV PORT=5001
+ENV WEBSITE_HOSTNAME=0.0.0.0
 
 # Start de applicatie met Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--worker-class", "eventlet", "--workers", "1", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--worker-class", "eventlet", "--workers", "1", "--timeout", "120", "app:app"]

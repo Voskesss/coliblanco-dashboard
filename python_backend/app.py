@@ -177,12 +177,19 @@ def get_audio(filename):
 @socketio.on('connect')
 def handle_connect():
     """Handler voor nieuwe WebSocket verbindingen"""
-    logger.info(f"Nieuwe client verbonden: {request.sid}")
-    active_sessions[request.sid] = {
-        'audio_chunks': [],
+    session_id = request.sid
+    logger.info(f"Nieuwe verbinding: {session_id}")
+    
+    # Initialiseer de sessie
+    active_sessions[session_id] = {
         'is_listening': False,
-        'conversation_history': []
+        'audio_chunks': [],
+        'conversation_history': [],
+        'last_activity': time.time(),
+        'manual_stop': False  # Nieuwe variabele om bij te houden of de opname handmatig is gestopt
     }
+    
+    emit('connected', {'session_id': session_id})
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -201,11 +208,19 @@ def handle_start_listening():
         emit('listening_started', {'status': 'success'})
 
 @socketio.on('stop_listening')
-def handle_stop_listening():
+def handle_stop_listening(data=None):
     """Stop met luisteren en verwerk de ontvangen audio"""
     logger.info(f"Stop luisteren voor client: {request.sid}")
+    
+    # Controleer of er data is meegegeven en of 'manual_stop' aanwezig is
+    manual_stop = False
+    if data and 'manual_stop' in data:
+        manual_stop = data['manual_stop']
+        logger.info(f"Handmatige stop: {manual_stop}")
+    
     if request.sid in active_sessions and active_sessions[request.sid]['is_listening']:
         active_sessions[request.sid]['is_listening'] = False
+        active_sessions[request.sid]['manual_stop'] = manual_stop
         
         # Verwerk de audio in een aparte thread om de WebSocket verbinding niet te blokkeren
         threading.Thread(target=process_audio, args=(request.sid,)).start()
@@ -236,11 +251,26 @@ def process_audio(session_id):
         
         session = active_sessions[session_id]
         audio_chunks = session['audio_chunks']
+        manual_stop = session.get('manual_stop', False)
         
+        # Reset de audio chunks voor de volgende opname
+        session['audio_chunks'] = []
+        
+        # Als er geen audio is of als het niet handmatig is gestopt en er weinig audio is,
+        # dan is het waarschijnlijk stilte of ruis
         if not audio_chunks:
             socketio.emit('processing_complete', {
                 'status': 'error',
                 'error': 'Geen audio ontvangen'
+            }, room=session_id)
+            return
+        
+        # Als het niet handmatig is gestopt en er weinig audio is, negeer het
+        if not manual_stop and len(audio_chunks) < 3:  # Minder dan 3 chunks is waarschijnlijk ruis
+            logger.info(f"Te weinig audio ontvangen en niet handmatig gestopt, negeren")
+            socketio.emit('processing_complete', {
+                'status': 'info',
+                'message': 'Te weinig audio om te verwerken'
             }, room=session_id)
             return
         
@@ -271,6 +301,15 @@ def process_audio(session_id):
             'text': transcription
         }, room=session_id)
         
+        # Controleer of het een interruptie is
+        is_interruption = False
+        try:
+            intent_analysis = analyze_intent(transcription, openai_client)
+            is_interruption = intent_analysis.get('interruptie', 'nee').lower() == 'ja'
+            logger.info(f"Intentie analyse: {intent_analysis}, Is interruptie: {is_interruption}")
+        except Exception as e:
+            logger.error(f"Fout bij intentie analyse: {str(e)}")
+        
         # Verwerk de tekst met het LLM
         messages = []
         if 'conversation_history' in session:
@@ -294,7 +333,8 @@ def process_audio(session_id):
         
         # Stuur het antwoord naar de client
         socketio.emit('llm_response', {
-            'text': assistant_message
+            'text': assistant_message,
+            'is_interruption': is_interruption
         }, room=session_id)
         
         # Genereer spraak voor het antwoord
@@ -309,13 +349,17 @@ def process_audio(session_id):
         
         # Stuur de URL van het audiobestand naar de client
         socketio.emit('tts_response', {
-            'url': f"/audio/{filename}"
+            'url': f"/audio/{filename}",
+            'is_interruption': is_interruption
         }, room=session_id)
         
         # Stuur een bericht dat de verwerking voltooid is
         socketio.emit('processing_complete', {
             'status': 'success'
         }, room=session_id)
+        
+        # Update de laatste activiteit
+        session['last_activity'] = time.time()
         
     except Exception as e:
         logger.error(f"Fout bij verwerken audio: {str(e)}")
