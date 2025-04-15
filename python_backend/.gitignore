@@ -1,0 +1,17 @@
+# Virtual environment
+venv/
+
+# Python cache bestanden
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Omgevingsvariabelen
+.env
+
+# Uploads en audio bestanden
+uploads/
+audio/
+
+# Logs
+*.log

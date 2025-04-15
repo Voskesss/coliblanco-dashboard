@@ -1,0 +1,19 @@
+# Basis framework
+flask==2.3.3
+flask-cors==4.0.0
+gunicorn==21.2.0
+
+# OpenAI API
+openai==1.12.0
+
+# Audio verwerking (zonder PyAudio)
+numpy==1.24.3
+pydub==0.25.1
+
+# Websockets voor realtime communicatie
+flask-socketio==5.3.6
+python-dotenv==1.0.0
+eventlet==0.33.3
+
+# Voor het maken van asynchroon gedrag
+requests==2.31.0

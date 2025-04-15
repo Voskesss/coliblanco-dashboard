@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from '@emotion/styled';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaStop, FaVolumeUp, FaPaperPlane, FaSpinner, FaVolumeMute, FaChevronUp, FaMicrophone, FaTimes } from 'react-icons/fa';
+import { FaStop, FaVolumeUp, FaSpinner, FaVolumeMute, FaChevronUp, FaMicrophone, FaTimes } from 'react-icons/fa';
 import { BsSoundwave } from 'react-icons/bs';
 import { textToSpeech, processWithLLM, transcribeAudio } from '../../utils/openai';
 import { setupRealtimeSession } from '../../utils/realtimeApi';
@@ -44,56 +44,6 @@ const MicButton = styled(motion.button)`
   }
 `;
 
-const TextInputContainer = styled(motion.div)`
-  position: fixed;
-  bottom: 2rem;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  width: 80%;
-  max-width: 600px;
-  background-color: rgba(255, 255, 255, 0.9);
-  border-radius: 20px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-  z-index: 1000;
-`;
-
-const Input = styled.textarea`
-  width: 100%;
-  padding: 15px;
-  border: none;
-  font-size: 16px;
-  background: transparent;
-  resize: none;
-  height: ${props => props.expanded ? '100px' : '50px'};
-  transition: height 0.3s ease;
-  
-  &:focus {
-    outline: none;
-    height: 100px;
-  }
-`;
-
-const SendButton = styled(motion.button)`
-  position: absolute;
-  right: 10px;
-  bottom: ${props => props.expanded ? '10px' : '5px'};
-  background-color: #FF9800;
-  border: none;
-  color: white;
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
-  transition: bottom 0.3s ease;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-`;
-
 const AudioControls = styled(motion.div)`
   position: absolute;
   bottom: -40px;
@@ -130,30 +80,78 @@ const FeedbackText = styled(motion.div)`
 
 const StatusIndicator = styled.div`
   position: absolute;
-  top: -5px;
-  right: -5px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background-color: ${props => {
-    if (props.isProcessing) return '#2196F3'; // blauw
-    if (props.isListening) return '#4CAF50'; // groen
-    if (props.isSpeaking) return '#F44336'; // rood
-    return 'transparent';
-  }};
-  border: 2px solid white;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80px;
+  height: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 10px;
+  background-color: ${props => 
+    props.isListening ? '#4CAF50' : 
+    props.isProcessing ? '#FF9800' : 
+    props.isSpeaking ? '#2196F3' : 'transparent'
+  };
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  opacity: ${props => (props.isListening || props.isProcessing || props.isSpeaking) ? 1 : 0};
+  transition: background-color 0.3s ease, opacity 0.3s ease;
 `;
 
 const StatusText = styled.div`
   position: absolute;
-  top: -20px;
-  right: 0;
-  font-size: 0.7rem;
-  background-color: rgba(0, 0, 0, 0.7);
+  bottom: -35px;
+  left: 50%;
+  transform: translateX(-50%);
   color: white;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0.5);
+  padding: 5px 10px;
+  border-radius: 10px;
   white-space: nowrap;
+`;
+
+const VolumeWaves = styled.div`
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  pointer-events: none;
+  
+  &::before, &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border: 2px solid rgba(255, 152, 0, 0.5);
+    border-radius: 50%;
+    animation: ${props => props.isListening ? 'pulse 2s infinite' : 'none'};
+  }
+  
+  &::after {
+    animation-delay: 0.5s;
+  }
+  
+  @keyframes pulse {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1.5);
+      opacity: 0;
+    }
+  }
 `;
 
 const TranscriptContainer = styled(motion.div)`
@@ -227,31 +225,30 @@ const StopButton = styled(motion.button)`
 
 const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [aiResponse, setAiResponse] = useState('');
   const [showTranscript, setShowTranscript] = useState(false);
   const [showResponse, setShowResponse] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [inputText, setInputText] = useState('');
-  const [expanded, setExpanded] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(80);
+  const [isMuted, setIsMuted] = useState(false);
   const [conversationMode, setConversationMode] = useState(false);
-  const [selectedVoice, setSelectedVoice] = useState('alloy');
   const [conversationHistory, setConversationHistory] = useState([]);
+  const [manualStop, setManualStop] = useState(false);
   
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const inputRef = useRef(null);
-  const conversationTimeoutRef = useRef(null);
-  const silenceDetectorRef = useRef(null);
-  const silenceTimeoutRef = useRef(null);
   const lastSoundTimestampRef = useRef(Date.now());
+  const silenceTimeoutRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const microphoneStreamRef = useRef(null);
+  const dataArrayRef = useRef(null);
+  const silenceDetectorRef = useRef(null);
   const interruptionDetectorRef = useRef(null);
+  const conversationTimeoutRef = useRef(null);
   const realtimeSessionRef = useRef(null);
   
   const initAudioContext = async (stream) => {
@@ -262,14 +259,19 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       
       analyserRef.current = audioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
-      analyserRef.current.smoothingTimeConstant = 0.8;
+      
+      const bufferLength = analyserRef.current.frequencyBinCount;
+      dataArrayRef.current = new Uint8Array(bufferLength);
       
       const source = audioContextRef.current.createMediaStreamSource(stream);
       source.connect(analyserRef.current);
       
+      microphoneStreamRef.current = stream;
+      
       startSilenceDetection();
     } catch (error) {
-      console.error('Fout bij initialiseren AudioContext:', error);
+      console.error('Fout bij initialiseren audio context:', error);
+      setErrorMessage(`Fout bij initialiseren audio context: ${error.message}`);
     }
   };
   
@@ -302,7 +304,8 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
       } else {
         const silenceDuration = Date.now() - lastSoundTimestampRef.current;
         
-        if (silenceDuration > 3000 && isListening && !silenceTimeoutRef.current) {
+        // Verhoog de stiltetijd naar 3500ms voor een natuurlijkere ervaring
+        if (silenceDuration > 3500 && isListening && !silenceTimeoutRef.current) {
           console.log('Stilte gedetecteerd, stoppen met luisteren over 1s...');
           silenceTimeoutRef.current = setTimeout(() => {
             console.log('Stilte bevestigd, stoppen met luisteren...');
@@ -333,6 +336,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   const stopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       console.log('Opname stoppen...');
+      setManualStop(true); // Markeer dat de opname handmatig is gestopt
       mediaRecorderRef.current.stop();
       
       // Stop alle tracks in de stream
@@ -347,6 +351,9 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   
   const startRecording = async () => {
     try {
+      // Reset de manualStop variabele bij het starten van een nieuwe opname
+      setManualStop(false);
+      
       // Vraag toegang tot de microfoon
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
@@ -377,6 +384,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
           if (audioBlob.size === 0) {
             console.log('Geen audio opgenomen');
             setIsListening(false);
+            setManualStop(false); // Reset de manualStop variabele
             return;
           }
           
@@ -392,10 +400,11 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
             setTranscript(transcription);
             setShowTranscript(true);
             
-            // Als er geen tekst is, stop dan
-            if (!transcription.trim()) {
-              console.log('Geen tekst gedetecteerd');
+            // Als er geen tekst is of als de opname handmatig is gestopt met weinig tekst, stop dan
+            if (!transcription.trim() || (manualStop && transcription.trim().length < 5)) {
+              console.log('Geen bruikbare tekst gedetecteerd of handmatig gestopt met weinig tekst');
               setIsProcessing(false);
+              setManualStop(false); // Reset de manualStop variabele
               return;
             }
             
@@ -422,6 +431,7 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
             setErrorMessage(`Fout bij verwerken van audio: ${error.message}`);
           } finally {
             setIsProcessing(false);
+            setManualStop(false); // Reset de manualStop variabele
           }
         } catch (error) {
           console.error('Fout bij verwerken van opname:', error);
@@ -449,48 +459,6 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
   const startNextListeningSession = () => {
     if (conversationMode && !isListening && !isProcessing) {
       startRecording();
-    }
-  };
-  
-  const handleSendText = async () => {
-    if (!inputText.trim() || isProcessing) return;
-    
-    try {
-      setIsProcessing(true);
-      setShowTranscript(true);
-      setTranscript(inputText);
-      
-      // Voeg de tekst toe aan de conversatiegeschiedenis
-      // Niet meer nodig, wordt nu in processWithLLM gedaan
-      // setConversationHistory([...conversationHistory, { type: 'user', text: inputText }]);
-      
-      const response = await processWithLLM(inputText, { conversationHistory });
-      
-      setAiResponse(response.response);
-      setShowResponse(true);
-      
-      // Update de conversatiegeschiedenis met de nieuwe geschiedenis van het antwoord
-      setConversationHistory(response.conversationHistory);
-      
-      await speakResponse(response.response);
-      
-      if (processCommand) {
-        processCommand(response.response);
-      }
-      
-      setInputText('');
-      setIsProcessing(false);
-    } catch (error) {
-      console.error('Fout bij verwerken van tekst:', error);
-      setErrorMessage(`Fout bij verwerken van tekst: ${error.message}`);
-      setIsProcessing(false);
-    }
-  };
-  
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendText();
     }
   };
   
@@ -569,12 +537,6 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
         audioContextRef.current.close();
       }
     };
-  }, []);
-  
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
   }, []);
   
   useEffect(() => {
@@ -676,6 +638,29 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
     }
   };
   
+  const getSoundLevelStyle = () => {
+    if (!isListening) return {};
+    
+    // Bereken een pulserende animatie gebaseerd op het geluidsniveau
+    const scale = 1 + (dataArrayRef.current ? Math.min(0.3, getAverageVolume() / 100) : 0);
+    
+    return {
+      transform: `scale(${scale})`,
+      boxShadow: `0 0 ${scale * 20}px rgba(255, 152, 0, ${scale * 0.5})`
+    };
+  };
+  
+  const getAverageVolume = () => {
+    if (!analyserRef.current || !dataArrayRef.current) return 0;
+    
+    analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+    let sum = 0;
+    for (let i = 0; i < dataArrayRef.current.length; i++) {
+      sum += dataArrayRef.current[i];
+    }
+    return sum / dataArrayRef.current.length;
+  };
+  
   return (
     <VoiceContainer>
       <AnimatePresence>
@@ -724,7 +709,9 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.9 }}
         title={isListening ? "Stop met luisteren" : "Start met luisteren"}
+        style={getSoundLevelStyle()}
       >
+        <VolumeWaves isListening={isListening} />
         {isListening ? <FaStop size={65} /> : <BsSoundwave size={70} />}
         <StatusIndicator
           isListening={isListening}
@@ -768,29 +755,6 @@ const RealtimeVoiceInterface = ({ orbStatus, processCommand }) => {
           </StopButton>
         )}
       </AnimatePresence>
-      
-      <TextInputContainer>
-        <Input
-          ref={inputRef}
-          placeholder="Typ je bericht..."
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          onKeyPress={handleKeyPress}
-          disabled={isProcessing}
-          expanded={expanded}
-          onFocus={() => setExpanded(true)}
-          onBlur={() => !inputText.trim() && setExpanded(false)}
-        />
-        <SendButton
-          onClick={handleSendText}
-          disabled={isProcessing || !inputText.trim()}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          expanded={expanded}
-        >
-          <FaPaperPlane size={30} />
-        </SendButton>
-      </TextInputContainer>
     </VoiceContainer>
   );
 };
