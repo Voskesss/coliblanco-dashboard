@@ -9,6 +9,7 @@ import PulsingOrb from '../UI/PulsingOrb';
 import logo from '../../components/UI/logo-coliblanco.png';
 import { textToSpeech } from '../../utils/openai';
 import { config } from '../../utils/config';
+import PWAInstallPrompt from '../UI/PWAInstallPrompt';
 
 // Hoofdcontainer voor de hele applicatie
 const DashboardContainer = styled.div`
@@ -938,6 +939,9 @@ const MinimalistDashboard = () => {
           <ContextCards />
         </div>} */}
       </MobileLayout>
+      
+      {/* PWA Installatie Prompt */}
+      <PWAInstallPrompt />
     </DashboardContainer>
   );
 };
