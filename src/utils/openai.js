@@ -43,41 +43,24 @@ export const transcribeAudio = async (audioBlob) => {
 // Functie voor het verwerken van tekst met het LLM via de Python backend
 export const processWithLLM = async (userText, context = {}) => {
   try {
-    console.log('Verwerken van tekst met LLM via Python backend...');
-    console.log('Context:', context);
+    console.log('Verwerken van tekst met LLM:', userText);
     
     // Bereid de berichten voor
-    let messages = [
-      {
-        role: "system",
-        content: `Je bent een vriendelijke Nederlandse assistent voor het Colibranco Dashboard. 
-                 Je geeft korte, behulpzame antwoorden in het Nederlands. 
-                 Wees beleefd, informatief en to-the-point.
-                 Houd je antwoorden kort en bondig, maar wel vriendelijk en behulpzaam.
-                 Spreek Nederlands.`
-      }
+    const messages = [
+      ...(context.conversationHistory || []),
+      { role: "user", content: userText }
     ];
     
-    // Voeg conversatiegeschiedenis toe als die er is
-    if (context.conversationHistory && Array.isArray(context.conversationHistory)) {
-      console.log('Conversatiegeschiedenis toevoegen:', context.conversationHistory);
-      messages = [...messages, ...context.conversationHistory];
-    }
-    
-    // Voeg het huidige bericht van de gebruiker toe
-    messages.push({ role: "user", content: userText });
-    
-    // Roep de Python backend aan
+    // Stuur een verzoek naar de backend
     const response = await fetch(`${PYTHON_BACKEND_URL}/api/chat`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         messages: messages,
-        model: config.models.openai.llm,
-        temperature: 0.7,
-        max_tokens: 150
+        model: context.model || 'gpt-4o',
+        temperature: context.temperature || 0.7
       })
     });
     
@@ -88,14 +71,15 @@ export const processWithLLM = async (userText, context = {}) => {
     const data = await response.json();
     console.log('LLM antwoord ontvangen:', data);
     
-    const assistantMessage = data.choices[0].message.content;
+    // Haal het antwoord op uit de response (aangepast voor het nieuwe formaat)
+    const assistantMessage = data.text || "Er is een fout opgetreden bij het verwerken van je vraag.";
     
     // Maak een nieuw antwoord object dat ook de bijgewerkte conversatiegeschiedenis bevat
     const result = {
       response: assistantMessage,
       conversationHistory: [...(context.conversationHistory || []), 
-                         { role: "user", content: userText }, 
-                         { role: "assistant", content: assistantMessage }]
+                       { role: "user", content: userText }, 
+                       { role: "assistant", content: assistantMessage }]
     };
     
     return result;
@@ -103,7 +87,9 @@ export const processWithLLM = async (userText, context = {}) => {
     console.error('Fout bij het verwerken van tekst met LLM:', error);
     return {
       response: "Er is een fout opgetreden bij het verwerken van je vraag.",
-      conversationHistory: context.conversationHistory || []
+      conversationHistory: [...(context.conversationHistory || []), 
+                       { role: "user", content: userText }, 
+                       { role: "assistant", content: "Er is een fout opgetreden bij het verwerken van je vraag." }]
     };
   }
 };

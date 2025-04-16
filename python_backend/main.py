@@ -6,6 +6,7 @@ import logging
 import asyncio
 import tempfile
 from typing import Optional, Dict, Any, List
+import requests
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
@@ -143,15 +144,60 @@ async def chat(request: ChatRequest):
         if not request.messages or len(request.messages) == 0:
             return {"text": "", "error": "Geen berichten ontvangen"}
         
-        # Gebruik een eenvoudig antwoord voor nu
-        # In een echte implementatie zou je hier OpenAI API aanroepen
-        response_text = "Dit is een testantwoord van de backend. De echte LLM-integratie wordt later toegevoegd."
+        # Haal de OpenAI API-sleutel op
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            logger.error("Geen OpenAI API-sleutel gevonden. Stel OPENAI_API_KEY in in je .env bestand.")
+            return {"text": "", "error": "Geen API-sleutel gevonden"}
+        
+        # Bereid de berichten voor
+        messages = [
+            {
+                "role": "system",
+                "content": "Je bent een vriendelijke Nederlandse assistent voor het Coliblanco Dashboard. "
+                           "Je geeft korte, behulpzame antwoorden in het Nederlands. "
+                           "Wees beleefd, informatief en to-the-point. "
+                           "Houd je antwoorden kort en bondig, maar wel vriendelijk en behulpzaam. "
+                           "Spreek Nederlands."
+            }
+        ]
+        
+        # Voeg de berichten van de gebruiker toe
+        for msg in request.messages:
+            messages.append({
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", "")
+            })
         
         logger.info(f"Chat verwerkt: {len(request.messages)} berichten")
         
-        # Geef een eenvoudige response terug die overeenkomt met het ChatResponse model
+        # Roep de OpenAI API aan
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {openai_api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": request.model or "gpt-4o",
+            "messages": messages,
+            "temperature": request.temperature or 0.7,
+            "max_tokens": 500
+        }
+        
+        # Stuur het verzoek naar OpenAI
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code != 200:
+            logger.error(f"Fout bij OpenAI API: {response.status_code} - {response.text}")
+            return {"text": "", "error": f"Fout bij OpenAI API: {response.status_code}"}
+        
+        # Verwerk het antwoord
+        response_data = response.json()
+        assistant_message = response_data["choices"][0]["message"]["content"]
+        
+        # Geef het antwoord terug
         return {
-            "text": response_text,
+            "text": assistant_message,
             "error": None
         }
     except Exception as e:
