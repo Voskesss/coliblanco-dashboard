@@ -7,15 +7,19 @@ import threading
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
-from flask_debugtoolbar import DebugToolbarExtension
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 from openai import OpenAI
+import asyncio
+import tempfile
 
 # Importeer de spraakverwerking en LLM modules
 # Maar importeer niet de client initialisatie
 from speech_processing import transcribe_audio, text_to_speech
 from llm_processing import process_with_llm, analyze_intent
+
+# Importeer de WebSocket spraakinterface
+from websocket_voice import get_websocket_handlers, init_audio_stream, process_with_llm as ws_process_with_llm
 
 # Laad environment variables
 load_dotenv()
@@ -34,7 +38,7 @@ CORS(app, resources={r"/*": {"origins": os.getenv("ALLOWED_ORIGINS", "*").split(
 app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "ontwikkelingssleutel")
 app.config['DEBUG_TB_ENABLED'] = True
 app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
-toolbar = DebugToolbarExtension(app)
+# toolbar = DebugToolbarExtension(app)
 
 # Configureer OpenAI API
 api_key = os.getenv("OPENAI_API_KEY")
@@ -47,6 +51,12 @@ openai_client = OpenAI(api_key=api_key)
 # Configureer SocketIO voor realtime communicatie
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# Initialiseer de audio stream voor de WebSocket spraakinterface
+init_audio_stream()
+
+# Haal de WebSocket handlers op
+ws_handlers = get_websocket_handlers()
+
 # Configureer uploads directory
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 AUDIO_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'audio')
@@ -55,6 +65,43 @@ os.makedirs(AUDIO_FOLDER, exist_ok=True)
 
 # Actieve spraaksessies bijhouden
 active_sessions = {}
+
+# Configuratie voor meerdere gebruikers
+MAX_INACTIVE_TIME = 300  # 5 minuten inactiviteit voordat een sessie wordt opgeschoond
+MAX_SESSIONS = 100  # Maximum aantal gelijktijdige sessies
+
+# Achtergrondtaak om inactieve sessies op te schonen
+def cleanup_inactive_sessions():
+    """Verwijder inactieve sessies om geheugenlekkage te voorkomen"""
+    while True:
+        try:
+            current_time = time.time()
+            to_remove = []
+            
+            for sid, session in active_sessions.items():
+                # Controleer wanneer de sessie voor het laatst actief was
+                last_active = session.get('last_active', current_time)
+                if current_time - last_active > MAX_INACTIVE_TIME:
+                    to_remove.append(sid)
+            
+            # Verwijder inactieve sessies
+            for sid in to_remove:
+                logger.info(f"Verwijderen van inactieve sessie: {sid}")
+                del active_sessions[sid]
+                
+            # Log het aantal actieve sessies
+            if active_sessions:
+                logger.debug(f"Aantal actieve sessies: {len(active_sessions)}")
+                
+        except Exception as e:
+            logger.error(f"Fout bij opschonen sessies: {str(e)}")
+            
+        # Wacht 60 seconden voordat we opnieuw controleren
+        time.sleep(60)
+
+# Start de achtergrondtaak voor het opschonen van sessies
+cleanup_thread = threading.Thread(target=cleanup_inactive_sessions, daemon=True)
+cleanup_thread.start()
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -180,32 +227,56 @@ def handle_connect():
     session_id = request.sid
     logger.info(f"Nieuwe verbinding: {session_id}")
     
+    # Controleer of we het maximum aantal sessies hebben bereikt
+    if len(active_sessions) >= MAX_SESSIONS:
+        logger.warning("Maximum aantal sessies bereikt, weiger nieuwe verbinding")
+        return False
+    
     # Initialiseer de sessie
     active_sessions[session_id] = {
         'is_listening': False,
         'audio_chunks': [],
-        'conversation_history': [],
-        'last_activity': time.time(),
-        'manual_stop': False  # Nieuwe variabele om bij te houden of de opname handmatig is gestopt
+        'last_active': time.time(),
+        'use_websocket': False
     }
     
+    # Stuur een bevestiging naar de client
     emit('connected', {'session_id': session_id})
+    return True
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handler voor verbroken WebSocket verbindingen"""
     logger.info(f"Client verbroken: {request.sid}")
+    
+    # Roep de WebSocket handler aan
+    if ws_handlers and 'disconnect' in ws_handlers:
+        asyncio.run(ws_handlers['disconnect'](request.sid))
+    
     if request.sid in active_sessions:
         del active_sessions[request.sid]
 
 @socketio.on('start_listening')
-def handle_start_listening():
+def handle_start_listening(data=None):
     """Start met luisteren naar audio van de client"""
     logger.info(f"Start luisteren voor client: {request.sid}")
+    
+    # Controleer of we de WebSocket-spraakinterface moeten gebruiken
+    use_websocket = False
+    if data and 'use_websocket' in data:
+        use_websocket = data['use_websocket']
+    
     if request.sid in active_sessions:
         active_sessions[request.sid]['is_listening'] = True
         active_sessions[request.sid]['audio_chunks'] = []
-        emit('listening_started', {'status': 'success'})
+        active_sessions[request.sid]['use_websocket'] = use_websocket
+        
+        # Als we de WebSocket-spraakinterface gebruiken, roep de handler aan
+        if use_websocket and ws_handlers and 'start_listening' in ws_handlers:
+            result = asyncio.run(ws_handlers['start_listening'](request.sid, data or {}))
+            emit('listening_started', {'status': 'success', 'websocket': True})
+        else:
+            emit('listening_started', {'status': 'success', 'websocket': False})
 
 @socketio.on('stop_listening')
 def handle_stop_listening(data=None):
@@ -222,26 +293,91 @@ def handle_stop_listening(data=None):
         active_sessions[request.sid]['is_listening'] = False
         active_sessions[request.sid]['manual_stop'] = manual_stop
         
-        # Verwerk de audio in een aparte thread om de WebSocket verbinding niet te blokkeren
-        threading.Thread(target=process_audio, args=(request.sid,)).start()
+        # Controleer of we de WebSocket-spraakinterface gebruiken
+        use_websocket = active_sessions[request.sid].get('use_websocket', False)
         
-        emit('listening_stopped', {'status': 'processing'})
+        if use_websocket and ws_handlers and 'stop_listening' in ws_handlers:
+            # Roep de WebSocket handler aan
+            result = asyncio.run(ws_handlers['stop_listening'](request.sid, data or {}))
+            emit('listening_stopped', {'status': 'processing', 'websocket': True})
+        else:
+            # Verwerk de audio in een aparte thread om de WebSocket verbinding niet te blokkeren
+            threading.Thread(target=process_audio, args=(request.sid,)).start()
+            emit('listening_stopped', {'status': 'processing', 'websocket': False})
 
 @socketio.on('audio_chunk')
 def handle_audio_chunk(data):
     """Ontvang een audio chunk van de client"""
     if request.sid in active_sessions and active_sessions[request.sid]['is_listening']:
-        # Voeg de audio chunk toe aan de buffer
-        active_sessions[request.sid]['audio_chunks'].append(data['audio_data'])
+        # Controleer of we de WebSocket-spraakinterface gebruiken
+        use_websocket = active_sessions[request.sid].get('use_websocket', False)
+        
+        if use_websocket and ws_handlers and 'audio_data' in ws_handlers:
+            # Roep de WebSocket handler aan
+            result = asyncio.run(ws_handlers['audio_data'](request.sid, data['audio_data']))
+        else:
+            # Voeg de audio chunk toe aan de buffer
+            active_sessions[request.sid]['audio_chunks'].append(data['audio_data'])
         
         # Stuur een bevestiging terug
         emit('chunk_received', {'status': 'success'})
 
-@socketio.on('interrupt')
-def handle_interrupt():
-    """Handler voor interrupties tijdens het spreken"""
-    logger.info(f"Interrupt ontvangen van client: {request.sid}")
-    emit('interrupted', {'status': 'success'})
+@socketio.on('process_command')
+def handle_process_command(data):
+    """Verwerk een commando van de client"""
+    logger.info(f"Commando ontvangen van client: {request.sid}")
+    
+    # Controleer of we de WebSocket-spraakinterface moeten gebruiken
+    use_websocket = False
+    if data and 'use_websocket' in data:
+        use_websocket = data['use_websocket']
+    
+    if use_websocket and ws_handlers and 'process_command' in ws_handlers:
+        # Roep de WebSocket handler aan
+        result = asyncio.run(ws_handlers['process_command'](request.sid, data))
+        
+        # Stuur het resultaat terug
+        if result and 'audio_path' in result and result['audio_path']:
+            # Maak een unieke bestandsnaam
+            filename = f"{uuid.uuid4()}.mp3"
+            audio_path = os.path.join(AUDIO_FOLDER, filename)
+            
+            # Kopieer het bestand
+            import shutil
+            shutil.copy(result['audio_path'], audio_path)
+            
+            # Verwijder het tijdelijke bestand
+            os.unlink(result['audio_path'])
+            
+            # Stuur het resultaat terug met de audio URL
+            emit('command_processed', {
+                'status': 'success',
+                'text': result['text'],
+                'audio_url': f"/audio/{filename}"
+            })
+        else:
+            # Stuur het resultaat terug zonder audio URL
+            emit('command_processed', {
+                'status': 'success',
+                'text': result['text'] if result and 'text' in result else ''
+            })
+    else:
+        # Gebruik de bestaande functionaliteit
+        text = data.get('text', '')
+        context = data.get('context', {})
+        
+        # Verwerk de tekst met het LLM
+        response = process_with_llm(text, context)
+        
+        # Zet het antwoord om naar spraak
+        audio_filename = text_to_speech(response)
+        
+        # Stuur het resultaat terug
+        emit('command_processed', {
+            'status': 'success',
+            'text': response,
+            'audio_url': f"/audio/{audio_filename}"
+        })
 
 def process_audio(session_id):
     """Verwerk de audio voor een bepaalde sessie"""
@@ -359,7 +495,7 @@ def process_audio(session_id):
         }, room=session_id)
         
         # Update de laatste activiteit
-        session['last_activity'] = time.time()
+        session['last_active'] = time.time()
         
     except Exception as e:
         logger.error(f"Fout bij verwerken audio: {str(e)}")

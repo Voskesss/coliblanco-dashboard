@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from '@emotion/styled';
 import { motion, AnimatePresence } from 'framer-motion';
+import PulsingOrb from './PulsingOrb';
+import { setupEnhancedVoiceProcessing } from '../../utils/openai';
+import { getWakeWordDetector } from '../../utils/wakeWord';
 import { FaMicrophone, FaStop, FaVolumeUp, FaVolumeMute, FaSpinner } from 'react-icons/fa';
 import { BsSoundwave } from 'react-icons/bs';
-import { setupRealtimeVoiceProcessing } from '../../utils/openai';
 
 const VoiceContainer = styled.div`
   position: absolute;
@@ -122,11 +124,14 @@ const EnhancedVoiceInterface = ({ onCommand, orbStatus, processCommand }) => {
   const [audioLevel, setAudioLevel] = useState(0);
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState(null);
+  const [wakeWordActive, setWakeWordActive] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('verbonden');
   
-  const voiceProcessingRef = useRef(null);
+  const voiceProcessorRef = useRef(null);
   const silenceDetectionIntervalRef = useRef(null);
   const audioElementRef = useRef(null);
   const audioLevelIntervalRef = useRef(null);
+  const wakeWordDetectorRef = useRef(null);
   
   // Gebruik processCommand als onCommand niet is meegegeven
   const handleCommand = (command) => {
@@ -153,125 +158,174 @@ const EnhancedVoiceInterface = ({ onCommand, orbStatus, processCommand }) => {
     }
   }, [orbStatus, isListening]);
   
+  // Initialiseer de wake word detector
+  const initWakeWordDetector = async () => {
+    try {
+      const detector = await getWakeWordDetector();
+      
+      if (detector) {
+        // Stel de callback in voor wanneer het wake word wordt gedetecteerd
+        detector.setOnWakeWordCallback(() => {
+          console.log('Wake word gedetecteerd!');
+          handleWakeWordDetected();
+        });
+        
+        try {
+          // Probeer de wake word detector te starten
+          const started = await detector.start();
+          if (!started) {
+            console.warn('Kon wake word detector niet starten, ga door zonder wake word detectie');
+          } else {
+            console.log('Wake word detector succesvol gestart');
+          }
+        } catch (startError) {
+          console.error('Fout bij starten wake word detector:', startError);
+          console.warn('Ga door zonder wake word detectie');
+        }
+      } else {
+        console.warn('Wake word detector niet beschikbaar, ga door zonder wake word detectie');
+      }
+    } catch (error) {
+      console.error('Fout bij initialiseren wake word detector:', error);
+      console.warn('Ga door zonder wake word detectie');
+    }
+  };
+  
+  useEffect(() => {
+    // Initialiseer de wake word detector
+    initWakeWordDetector();
+    
+    // Cleanup functie
+    return () => {
+      if (wakeWordDetectorRef.current) {
+        try {
+          wakeWordDetectorRef.current.release();
+        } catch (error) {
+          console.error('Fout bij opruimen wake word detector:', error);
+        }
+      }
+    };
+  }, []);
+  
   // Initialiseer de realtime spraakverwerking
   useEffect(() => {
     // Maak een nieuwe instantie van de spraakverwerking
-    voiceProcessingRef.current = setupRealtimeVoiceProcessing();
+    const voiceProcessor = setupEnhancedVoiceProcessing();
     
-    // Registreer callbacks
-    if (voiceProcessingRef.current) {
-      voiceProcessingRef.current.registerCallbacks({
-        onConnect: () => {
-          console.log('Verbonden met de server');
-          setFeedback('Verbonden met de server');
-          setTimeout(() => setFeedback(''), 2000);
-        },
+    if (!voiceProcessor) {
+      setError('Je browser ondersteunt geen WebSockets, wat nodig is voor de spraakinterface.');
+      return;
+    }
+    
+    // Stel callbacks in
+    voiceProcessor.setCallbacks({
+      onConnect: () => {
+        console.log('Verbonden met de server');
+        setError(null);
+        setConnectionStatus('verbonden');
+      },
+      
+      onDisconnect: () => {
+        console.log('Verbinding met de server verbroken');
+        setError('Verbinding met de server verbroken. Probeer het later opnieuw.');
+        setIsListening(false);
+        setIsProcessing(false);
+        setConnectionStatus('verbroken');
         
-        onDisconnect: () => {
-          console.log('Verbinding met de server verbroken');
-          setFeedback('Verbinding verbroken');
-          setIsListening(false);
-          setIsProcessing(false);
-          setIsSpeaking(false);
-        },
+        // Probeer automatisch opnieuw te verbinden
+        setTimeout(() => {
+          if (voiceProcessor) {
+            console.log('Automatisch opnieuw verbinden...');
+            voiceProcessor.connect();
+          }
+        }, 5000); // Probeer na 5 seconden opnieuw te verbinden
+      },
+      
+      onListeningStart: (data) => {
+        console.log('Luisteren gestart', data);
+        setIsListening(true);
+        setIsProcessing(false);
+        setFeedback('Ik luister...');
         
-        onListeningStart: () => {
-          console.log('Luisteren gestart');
-          setIsListening(true);
-          setFeedback('Ik luister...');
-          
-          // Start stiltedetectie
-          silenceDetectionIntervalRef.current = voiceProcessingRef.current.startSilenceDetection(10, 1500);
-          
-          // Start het monitoren van het geluidsniveau
-          startAudioLevelMonitoring();
-        },
+        // Start het monitoren van het geluidsniveau
+        startAudioLevelMonitoring();
+      },
+      
+      onListeningStop: (data) => {
+        console.log('Luisteren gestopt', data);
+        setIsListening(false);
+        setIsProcessing(true);
+        setFeedback('Verwerken...');
         
-        onListeningStop: () => {
-          console.log('Luisteren gestopt');
-          setIsListening(false);
-          setIsProcessing(true);
-          setFeedback('Verwerken...');
-          
-          // Stop stiltedetectie
-          voiceProcessingRef.current.stopSilenceDetection(silenceDetectionIntervalRef.current);
-          
-          // Stop het monitoren van het geluidsniveau
-          stopAudioLevelMonitoring();
-        },
+        // Stop het monitoren van het geluidsniveau
+        stopAudioLevelMonitoring();
+      },
+      
+      onError: (error) => {
+        console.error('Fout in spraakverwerking:', error);
+        setError(`Fout in spraakverwerking: ${error.message || 'Onbekende fout'}`);
+        setIsListening(false);
+        setIsProcessing(false);
         
-        onTranscription: (data) => {
-          console.log('Transcriptie ontvangen:', data);
-          setTranscript(data.text);
-          setFeedback(`"${data.text}"`);
-        },
+        // Stop het monitoren van het geluidsniveau
+        stopAudioLevelMonitoring();
+      },
+      
+      onAudioLevel: (level) => {
+        setAudioLevel(level);
+      },
+      
+      onChunkProcessed: (data) => {
+        // Update het audio niveau
+        if (data && data.level) {
+          setAudioLevel(data.level);
+        }
+      },
+      
+      onCommandProcessed: (data) => {
+        console.log('Commando verwerkt:', data);
+        setIsProcessing(false);
         
-        onLLMResponse: (data) => {
-          console.log('LLM antwoord ontvangen:', data);
+        if (data.status === 'success') {
           setResponse(data.text);
+          setTranscript(''); // Reset de transcriptie
           
-          // Als het een interruptie is, update de UI anders
-          if (data.is_interruption) {
-            setFeedback(`Jij: "${transcript}"
-AI: "${data.text}" (interruptie)`);
-          } else {
-            setFeedback(`Jij: "${transcript}"
-AI: "${data.text}"`);
+          if (data.audio_url) {
+            setAudioUrl(data.audio_url);
+            // Speel de audio af
+            if (audioElementRef.current) {
+              audioElementRef.current.src = data.audio_url;
+              audioElementRef.current.play();
+              setIsSpeaking(true);
+            }
           }
           
           // Stuur het commando door naar de parent component
           handleCommand(data.text);
-        },
-        
-        onTTSResponse: (data) => {
-          console.log('TTS antwoord ontvangen:', data);
-          setAudioUrl(data.fullUrl);
-          playAudio(data.fullUrl, data.is_interruption);
-        },
-        
-        onProcessingComplete: (data) => {
-          console.log('Verwerking voltooid:', data);
-          setIsProcessing(false);
-          
-          // Als er een fout is, toon deze
-          if (data.status === 'error') {
-            setError(data.error);
-            setFeedback(`Fout: ${data.error}`);
-            setTimeout(() => {
-              setFeedback('');
-              setError(null);
-            }, 3000);
-          }
-        },
-        
-        onError: (error) => {
-          console.error('Fout:', error);
-          setError(error);
-          setFeedback(`Fout: ${error.message || error}`);
-          setIsListening(false);
-          setIsProcessing(false);
-          setIsSpeaking(false);
-          
-          setTimeout(() => {
-            setFeedback('');
-            setError(null);
-          }, 3000);
+        } else {
+          setError(`Fout bij verwerken commando: ${data.message || 'Onbekende fout'}`);
         }
-      });
-      
-      // Maak verbinding met de server
-      voiceProcessingRef.current.connect();
+      }
+    });
+    
+    // Verbind met de server
+    const connected = voiceProcessor.connect();
+    console.log('Verbinding status:', connected ? 'verbonden' : 'niet verbonden');
+    
+    // Sla de voiceProcessor op in een ref voor later gebruik
+    voiceProcessorRef.current = voiceProcessor;
+    
+    // Luister naar het einde van de audio afspelen
+    if (audioElementRef.current) {
+      audioElementRef.current.onended = () => {
+        setIsSpeaking(false);
+      };
     }
     
     // Cleanup functie
     return () => {
-      if (voiceProcessingRef.current) {
-        voiceProcessingRef.current.disconnect();
-      }
-      
-      if (audioElementRef.current) {
-        audioElementRef.current.pause();
-        audioElementRef.current = null;
+      if (voiceProcessorRef.current) {
+        voiceProcessorRef.current.disconnect();
       }
       
       stopAudioLevelMonitoring();
@@ -284,12 +338,8 @@ AI: "${data.text}"`);
       clearInterval(audioLevelIntervalRef.current);
     }
     
-    audioLevelIntervalRef.current = setInterval(() => {
-      if (voiceProcessingRef.current) {
-        const level = voiceProcessingRef.current.getAudioLevel();
-        setAudioLevel(level);
-      }
-    }, 100);
+    // In de nieuwe interface wordt het geluidsniveau al bijgehouden door de callbacks
+    // We hoeven hier dus niets te doen
   };
   
   // Functie om het monitoren van het geluidsniveau te stoppen
@@ -327,9 +377,9 @@ AI: "${data.text}"`);
       }, 2000);
       
       // Als het geen interruptie was, begin automatisch weer met luisteren
-      if (!isInterruption && voiceProcessingRef.current) {
+      if (!isInterruption && voiceProcessorRef.current) {
         setTimeout(() => {
-          voiceProcessingRef.current.startListening();
+          voiceProcessorRef.current.startListening();
         }, 500);
       }
     };
@@ -357,29 +407,47 @@ AI: "${data.text}"`);
   
   // Functie om te beginnen of stoppen met luisteren
   const handleToggleListening = () => {
-    if (!voiceProcessingRef.current) return;
+    if (!voiceProcessorRef.current) return;
     
     if (isListening) {
       // Stop met luisteren
-      voiceProcessingRef.current.stopListening(true); // true = handmatig gestopt
+      voiceProcessorRef.current.stopListening(true); // true = handmatig gestopt
     } else if (isProcessing) {
-      // Als we aan het verwerken zijn, stuur een interruptie
-      voiceProcessingRef.current.sendInterrupt();
+      // Als we aan het verwerken zijn, kunnen we niet onderbreken met deze nieuwe interface
+      // Toon een melding
+      setFeedback('Even geduld, ik ben nog aan het verwerken...');
     } else if (isSpeaking) {
-      // Als we aan het spreken zijn, stop met spreken en stuur een interruptie
+      // Als we aan het spreken zijn, stop met spreken
       if (audioElementRef.current) {
         audioElementRef.current.pause();
         setIsSpeaking(false);
       }
-      voiceProcessingRef.current.sendInterrupt();
       
       // Begin direct met luisteren
       setTimeout(() => {
-        voiceProcessingRef.current.startListening();
+        voiceProcessorRef.current.startListening();
       }, 300);
     } else {
       // Begin met luisteren
-      voiceProcessingRef.current.startListening();
+      voiceProcessorRef.current.startListening();
+    }
+  };
+  
+  // Functie om te starten met luisteren
+  const startListening = () => {
+    if (voiceProcessorRef.current) {
+      voiceProcessorRef.current.startListening();
+    }
+  };
+  
+  // Functie om te reageren op wake word detectie
+  const handleWakeWordDetected = () => {
+    console.log('Wake word gedetecteerd, start met luisteren...');
+    setFeedback('Wake word gedetecteerd!');
+    
+    // Start met luisteren als we niet al aan het luisteren zijn
+    if (!isListening && !isProcessing && !isSpeaking) {
+      startListening();
     }
   };
   

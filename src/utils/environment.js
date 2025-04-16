@@ -13,7 +13,7 @@ export const getBackendUrl = () => {
   }
   
   // In ontwikkeling, gebruik localhost
-  return 'http://localhost:5001';
+  return 'http://localhost:8000';
 };
 
 // Configuratie voor WebSocket URL
@@ -25,7 +25,7 @@ export const getWebSocketUrl = () => {
   }
   
   // In ontwikkeling, gebruik localhost
-  return 'ws://localhost:5001';
+  return 'ws://localhost:8000';
 };
 
 // Exporteer de omgevingsvariabelen

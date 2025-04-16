@@ -1,23 +1,33 @@
 # Basis framework
-flask==2.3.3
-flask-cors==4.0.0
-gunicorn==21.2.0
-flask-debugtoolbar==0.13.1
+fastapi==0.104.1
+uvicorn==0.23.2
+python-multipart==0.0.6
+pydantic==2.4.2
+
+# CORS en middleware
+starlette==0.27.0
+
+# WebSockets voor realtime communicatie
+websockets==12.0
 
 # OpenAI API
 openai==1.74.0
 httpx==0.28.1
 
-# Audio verwerking (zonder PyAudio)
+# Audio verwerking
 numpy==1.26.1
 pydub==0.25.1
+sounddevice==0.4.6
+soundfile==0.12.1
 
-# Websockets voor realtime communicatie
-flask-socketio==5.3.6
+# Deepgram voor STT en TTS
+deepgram-sdk==2.11.0
+
+# Picovoice voor wake word detectie (server-side)
+pvporcupine==2.2.1
+
+# Utilities
 python-dotenv==1.0.0
-eventlet==0.33.3
-python-engineio==4.7.1
-python-socketio==5.10.0
-
-# Voor het maken van asynchroon gedrag
+python-jose==3.3.0
+passlib==1.7.4
 requests==2.31.0

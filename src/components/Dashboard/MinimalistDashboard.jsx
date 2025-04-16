@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { useAppContext } from '../../context/AppContext';
 import { useDashboard } from './DashboardController';
 // import ContextCards from './ContextCards'; // Verwijderd omdat we deze niet meer gebruiken
-import RealtimeVoiceInterface from '../UI/RealtimeVoiceInterface';
+import EnhancedVoiceInterface from '../UI/EnhancedVoiceInterface';
 import PulsingOrb from '../UI/PulsingOrb';
 import logo from '../../components/UI/logo-coliblanco.png';
 import { textToSpeech } from '../../utils/openai';
@@ -828,7 +828,7 @@ const MinimalistDashboard = () => {
           {/* Verwijderd: {showCards && <ContextCards />} */}
           
           <VoiceContainer>
-            <RealtimeVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
+            <EnhancedVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
           </VoiceContainer>
           
           <TextInputContainer>
@@ -893,7 +893,7 @@ const MinimalistDashboard = () => {
         
         {/* Voice interface voor mobiel */}
         <MobileVoiceSection>
-          <RealtimeVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
+          <EnhancedVoiceInterface orbStatus={orbStatus} processCommand={processCommand} />
         </MobileVoiceSection>
         
         {/* Navigatie voor mobiel */}
