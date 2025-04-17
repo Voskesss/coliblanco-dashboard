@@ -22,29 +22,33 @@ LANGUAGE = os.getenv("LANGUAGE", "nl")
 dg_client = Deepgram(DEEPGRAM_API_KEY)
 
 async def transcribe_audio(audio_data, language=None):
-    """Transcribeer audio met Deepgram Nova-3"""
+    """Transcribeer audio met Deepgram Nova-2"""
     try:
         # Gebruik de opgegeven taal of val terug op de standaardtaal
         lang = language or LANGUAGE
         
         # Maak een tijdelijk bestand voor de audio data
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
             temp_file.write(audio_data)
             temp_file_path = temp_file.name
         
-        # Configureer de transcriptie opties
-        source = {'buffer': audio_data, 'mimetype': 'audio/wav'}
-        options = {
-            'model': 'nova-3',
-            'language': lang,
-            'smart_format': True,
-            'diarize': True,
-            'utterances': True,
-            'detect_language': True
-        }
+        # Log de API-sleutel (alleen de eerste 5 tekens voor veiligheid)
+        if DEEPGRAM_API_KEY:
+            logger.info(f"Deepgram API-sleutel gevonden: {DEEPGRAM_API_KEY[:5]}...")
+        else:
+            logger.error("Geen Deepgram API-sleutel gevonden")
         
-        # Transcribeer de audio
-        response = await dg_client.transcription.prerecorded(source, options)
+        # Configureer de transcriptie opties - gebruik een bestand in plaats van buffer
+        with open(temp_file_path, 'rb') as audio_file:
+            source = {'file': audio_file}
+            options = {
+                'model': 'nova-2',  # Probeer nova-2 in plaats van nova-3
+                'language': lang
+            }
+            
+            # Transcribeer de audio
+            logger.info(f"Transcriberen van bestand: {temp_file_path}")
+            response = await dg_client.transcription.prerecorded(source, options)
         
         # Verwijder het tijdelijke bestand
         os.unlink(temp_file_path)
@@ -256,16 +260,36 @@ class DeepgramLiveTranscription:
 # Test functie
 async def test_deepgram():
     """Test de Deepgram integratie"""
-    # Test STT
-    with open("test.wav", "rb") as f:
-        audio_data = f.read()
-    
-    result = await transcribe_audio(audio_data)
-    print(f"Transcriptie: {result['text']}")
-    
-    # Test TTS
-    tts_result = await text_to_speech("Dit is een test van de OpenAI text-to-speech.")
-    print(f"TTS resultaat: {tts_result}")
+    try:
+        print("Testen van Deepgram integratie...")
+        
+        # Gebruik een bestaand MP3-bestand uit de audio map
+        audio_file = "cb21d732-4b3f-4a10-bb1b-1885c12a13ff.mp3"  # Een van de grotere bestanden
+        audio_path = os.path.join(os.path.dirname(__file__), "audio", audio_file)
+        
+        # Controleer of het bestand bestaat
+        if not os.path.exists(audio_path):
+            print(f"Bestand niet gevonden: {audio_path}")
+            return
+        
+        print(f"Bestand gevonden: {audio_path}")
+        
+        # Lees de audio data
+        with open(audio_path, "rb") as f:
+            audio_data = f.read()
+        
+        # Transcribeer de audio
+        result = await transcribe_audio(audio_data)
+        
+        print("Transcriptie resultaat:")
+        print(json.dumps(result, indent=2))
+        
+        return result
+    except Exception as e:
+        print(f"Fout bij testen Deepgram: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     asyncio.run(test_deepgram())

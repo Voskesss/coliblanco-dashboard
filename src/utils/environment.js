@@ -9,7 +9,7 @@ export const getBackendUrl = () => {
   // In productie, gebruik de Azure URL
   if (isProduction) {
     // Gebruik de geconfigureerde URL of de standaard Azure URL
-    return import.meta.env.VITE_BACKEND_URL || 'https://coliblanco-python-backend.azurewebsites.net';
+    return import.meta.env.VITE_BACKEND_URL || 'https://coliblanco-backend-gwgvekf9hzfea0en.westeurope-01.azurewebsites.net';
   }
   
   // In ontwikkeling, gebruik localhost
@@ -21,7 +21,7 @@ export const getWebSocketUrl = () => {
   // In productie, gebruik de Azure URL
   if (isProduction) {
     // Gebruik de geconfigureerde URL of de standaard Azure URL
-    return import.meta.env.VITE_WEBSOCKET_URL || 'wss://coliblanco-python-backend.azurewebsites.net';
+    return import.meta.env.VITE_WEBSOCKET_URL || 'wss://coliblanco-backend-gwgvekf9hzfea0en.westeurope-01.azurewebsites.net';
   }
   
   // In ontwikkeling, gebruik localhost

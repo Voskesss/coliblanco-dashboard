@@ -26,5 +26,5 @@ EXPOSE 8000
 ENV PORT=8000
 ENV WEBSITE_HOSTNAME=0.0.0.0
 
-# Start de applicatie met Uvicorn (FastAPI)
+# Start de applicatie met FastAPI (main.py)
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

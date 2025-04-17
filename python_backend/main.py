@@ -24,7 +24,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Importeer de spraakverwerking modules (deze maken we later)
-from deepgram_integration import transcribe_audio, text_to_speech, DeepgramLiveTranscription
+# from deepgram_integration import transcribe_audio, text_to_speech, DeepgramLiveTranscription
+
+# Gebruik OpenAI Whisper in plaats van Deepgram
+from speech_processing import transcribe_audio, text_to_speech, WhisperLiveTranscription
+from openai import OpenAI  # Importeer de OpenAI client
 
 # Configuratie
 PORT = int(os.getenv("PORT", "8000"))
@@ -117,11 +121,17 @@ async def tts(request: TTSRequest):
         if not request.text or request.text.strip() == "":
             return {"audio_url": "", "error": "Tekst mag niet leeg zijn"}
         
-        # Zet de tekst om naar spraak
-        result = await text_to_speech(request.text, request.voice, request.language)
+        # Initialiseer OpenAI client
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
-        if "error" in result:
-            return {"audio_url": "", "error": result["error"]}
+        # Bepaal de stem (gebruik 'alloy' als fallback)
+        voice = request.voice if request.voice else "alloy"
+        
+        # Log de parameters
+        logger.info(f"TTS aanroep met tekst: {request.text[:30]}..., stem: {voice}")
+        
+        # Zet de tekst om naar spraak
+        audio_data = text_to_speech(request.text, client, voice=voice)
         
         # Genereer een unieke bestandsnaam
         filename = f"{uuid.uuid4()}.mp3"
@@ -129,7 +139,7 @@ async def tts(request: TTSRequest):
         
         # Sla de audio op
         with open(audio_path, "wb") as f:
-            f.write(result["audio"])
+            f.write(audio_data)
         
         return {"audio_url": f"/audio/{filename}"}
     except Exception as e:
@@ -275,9 +285,9 @@ async def voice_websocket(websocket: WebSocket):
                     
                     # Initialiseer de transcriptie als die nog niet bestaat
                     if not active_sessions[session_id]["transcription"]:
-                        active_sessions[session_id]["transcription"] = DeepgramLiveTranscription()
+                        active_sessions[session_id]["transcription"] = WhisperLiveTranscription()
                     
-                    # Start de Deepgram transcriptie
+                    # Start de transcriptie
                     language = message.get("language", active_sessions[session_id]["language"])
                     active_sessions[session_id]["language"] = language
                     
@@ -300,13 +310,13 @@ async def voice_websocket(websocket: WebSocket):
                     if active_sessions[session_id]["transcription"]:
                         try:
                             await active_sessions[session_id]["transcription"].stop()
-                            
-                            # Stuur een bevestiging
-                            await websocket.send_json({"event": "listening_stopped"})
-                            logger.info(f"Luisteren gestopt voor sessie: {session_id}")
                         except Exception as e:
                             logger.error(f"Fout bij stoppen transcriptie voor sessie {session_id}: {str(e)}")
                             await websocket.send_json({"event": "error", "message": f"Fout bij stoppen transcriptie: {str(e)}"})
+                    
+                    # Stuur een bevestiging
+                    await websocket.send_json({"event": "listening_stopped"})
+                    logger.info(f"Luisteren gestopt voor sessie: {session_id}")
                 
                 elif event == "process_command":
                     # Verwerk het commando
@@ -373,11 +383,11 @@ async def voice_websocket(websocket: WebSocket):
                                     # Als het geen string is, gebruik het zoals het is
                                     audio_bytes = audio_data
                                 
-                                # Stuur de audio naar Deepgram
+                                # Stuur de audio naar de transcriptie
                                 await active_sessions[session_id]["transcription"].send_audio(audio_bytes)
                                 logger.debug(f"Audio chunk ontvangen voor sessie: {session_id}")
                             except Exception as e:
-                                logger.error(f"Fout bij verzenden audio naar Deepgram voor sessie {session_id}: {str(e)}")
+                                logger.error(f"Fout bij verzenden audio naar transcriptie voor sessie {session_id}: {str(e)}")
             
             except asyncio.TimeoutError:
                 # Stuur een ping naar de client om te controleren of de verbinding nog actief is
@@ -460,7 +470,10 @@ async def cleanup_inactive_sessions():
                 
                 # Stop de transcriptie
                 if active_sessions[sid]["transcription"]:
-                    await active_sessions[sid]["transcription"].stop()
+                    try:
+                        await active_sessions[sid]["transcription"].stop()
+                    except Exception as e:
+                        logger.error(f"Fout bij stoppen transcriptie voor sessie {sid}: {str(e)}")
                 
                 # Verwijder de sessie
                 del active_sessions[sid]
