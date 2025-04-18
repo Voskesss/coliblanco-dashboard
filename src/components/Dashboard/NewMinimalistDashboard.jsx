@@ -7,12 +7,13 @@ import ContextCards from './ContextCards';
 import PulsingOrb from '../UI/PulsingOrb';
 import logo from '../../components/UI/logo-coliblanco.png';
 import { getStableGreeting } from '../../utils/greetings';
+import GradientSettings from '../UI/GradientSettings';
 
 // Hoofdcontainer voor de hele applicatie
 const DashboardContainer = styled.div`
   width: 100vw;
   height: 100vh;
-  background: linear-gradient(135deg, #EED0BA 0%, #8BAED9 50%, #1B406F 100%);
+  background: var(--dashboard-gradient);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -481,6 +482,9 @@ const NewMinimalistDashboard = () => {
           <ContextCards />
         </div>}
       </MobileLayout>
+
+      {/* Gradient instellingen */}
+      <GradientSettings />
     </DashboardContainer>
   );
 };

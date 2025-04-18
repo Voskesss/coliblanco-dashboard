@@ -11,6 +11,8 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  --dashboard-gradient: linear-gradient(135deg, #EED0BA 0%, #8BAED9 50%, #1B406F 100%);
 }
 
 a {

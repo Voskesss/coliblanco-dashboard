@@ -16,7 +16,7 @@ import { getStableGreeting } from '../../utils/greetings';
 const DashboardContainer = styled.div`
   width: 100vw;
   height: 100vh;
-  background: linear-gradient(135deg, #EED0BA 0%, #8BAED9 50%, #1B406F 100%);
+  background: var(--dashboard-gradient, linear-gradient(135deg, #EED0BA 0%, #8BAED9 50%, #1B406F 100%));
   display: flex;
   flex-direction: column;
   align-items: center;

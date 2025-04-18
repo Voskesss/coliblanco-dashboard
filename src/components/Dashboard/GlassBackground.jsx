@@ -7,7 +7,6 @@ const BackgroundWrapper = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(135deg, #e6e9f0 0%, #d3cce3 50%, #e2d1c3 100%);
   z-index: -1;
   overflow: hidden;
 `;
@@ -19,9 +18,9 @@ const GradientCircle = styled.div`
   filter: blur(20px);
 `;
 
-const GlassBackground = () => {
+const GlassBackground = ({ backgroundGradient }) => {
   return (
-    <BackgroundWrapper>
+    <BackgroundWrapper className="background-wrapper" style={{ background: backgroundGradient }}>
       <GradientCircle 
         style={{
           width: '800px',
