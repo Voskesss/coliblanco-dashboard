@@ -3,5 +3,14 @@
     "apps": [
       "G3N6YWNG5R.com.coliblanco.ColiClip2025.Clip"
     ]
+  },
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "G3N6YWNG5R.com.coliblanco.ColiClip2025.Clip",
+        "paths": ["/", "/onboard*", "/experience*"]
+      }
+    ]
   }
 }
