@@ -1,6 +1,7 @@
 import React from 'react';
 import styled from '@emotion/styled';
 import ContextCards from '../ContextCards';
+import { getStableGreeting } from '../../../utils/greetings';
 
 const MessageComponentContainer = styled.div`
   display: flex;
@@ -70,7 +71,7 @@ const MessageComponent = ({ message, showCards }) => {
   return (
     <MessageComponentContainer>
       <MessageBox>
-        <p>{message || "Goedemorgen, ik hoop dat je lekker hebt geslapen!"}</p>
+        <p>{message || getStableGreeting()}</p>
       </MessageBox>
       {showCards && <ContextCards />}
     </MessageComponentContainer>

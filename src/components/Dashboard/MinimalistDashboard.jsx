@@ -10,6 +10,7 @@ import logo from '../../components/UI/logo-coliblanco.png';
 import { textToSpeech } from '../../utils/openai';
 import { config } from '../../utils/config';
 import PWAInstallPrompt from '../UI/PWAInstallPrompt';
+import { getStableGreeting } from '../../utils/greetings';
 
 // Hoofdcontainer voor de hele applicatie
 const DashboardContainer = styled.div`
@@ -822,7 +823,7 @@ const MinimalistDashboard = () => {
           </DesktopOrbContainer>
           
           <DesktopMessageContainer>
-            <p>{lastCommand || "Goedemorgen, ik hoop dat je lekker hebt geslapen!"}</p>
+            <p>{lastCommand || getStableGreeting()}</p>
           </DesktopMessageContainer>
           
           {/* Verwijderd: {showCards && <ContextCards />} */}
@@ -888,7 +889,7 @@ const MinimalistDashboard = () => {
         
         {/* Bericht voor mobiel */}
         <MobileMessageSection>
-          <p>{lastCommand || "Goedemorgen, ik hoop dat je lekker hebt geslapen!"}</p>
+          <p>{lastCommand || getStableGreeting()}</p>
         </MobileMessageSection>
         
         {/* Voice interface voor mobiel */}

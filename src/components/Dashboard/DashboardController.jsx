@@ -1,4 +1,5 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
+import { getStableGreeting } from '../../utils/greetings';
 
 // Context voor dashboard data en functies
 const DashboardContext = createContext();
@@ -94,7 +95,7 @@ const DashboardController = ({ children }) => {
   };
   
   // Alle data en functies die we willen delen met dashboards
-  const [lastCommand, setLastCommand] = useState("Goedemorgen, ik hoop dat je lekker hebt geslapen!");
+  const [lastCommand, setLastCommand] = useState(getStableGreeting());
   const [orbStatus, setOrbStatus] = useState('idle'); // idle, listening, processing, active
   const [showCards, setShowCards] = useState(false);
   

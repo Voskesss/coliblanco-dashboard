@@ -6,6 +6,7 @@ import RealtimeVoiceInterface from '../UI/RealtimeVoiceInterface';
 import ContextCards from './ContextCards';
 import PulsingOrb from '../UI/PulsingOrb';
 import logo from '../../components/UI/logo-coliblanco.png';
+import { getStableGreeting } from '../../utils/greetings';
 
 // Hoofdcontainer voor de hele applicatie
 const DashboardContainer = styled.div`
@@ -414,7 +415,7 @@ const NewMinimalistDashboard = () => {
         
         {/* Bericht */}
         <MessageContainer>
-          <p>{lastCommand || "Goedemorgen, ik hoop dat je lekker hebt geslapen!"}</p>
+          <p>{lastCommand || getStableGreeting()}</p>
         </MessageContainer>
         
         {/* Context cards */}
@@ -464,7 +465,7 @@ const NewMinimalistDashboard = () => {
         
         {/* Bericht voor mobiel */}
         <MessageContainer>
-          <p>{lastCommand || "Goedemorgen, ik hoop dat je lekker hebt geslapen!"}</p>
+          <p>{lastCommand || getStableGreeting()}</p>
         </MessageContainer>
         
         {/* Voice interface voor mobiel */}
